@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Check 
+      run: cargo check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Install grcov
+      run: |
+        rustup component add llvm-tools-preview
+        cargo install grcov
+    
+    - name: Run tests
+      run: cargo test --all
+      env:
+        RUSTFLAGS: "-Cinstrument-coverage"
+    
+    - name: Create coverage report
+      run: |
+        grcov . \
+            --binary-path ./target/debug/deps/ \
+            --source-dir . \
+            --excl-start 'mod test* \{' \
+            --ignore '*test*' \
+            --ignore "*test.rs" \
+            --ignore "*main.rs" \
+            --ignore "*tests.rs" \
+            --ignore "*github.com*" \
+            --ignore "*libcore*" \
+            --ignore "*rustc*" \
+            --ignore "*liballoc*" \
+            --ignore "*cargo*" \
+            -t coveralls+ \
+            --token ? \
+            -o ./cov_normal.json
+
+    - name: Codecov
+      uses: codecov/codecov-action@v4.5.0
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./cov_normal.json
+        flags: unittests
+        fail_ci_if_error: false
+  
