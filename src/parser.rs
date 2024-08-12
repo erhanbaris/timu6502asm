@@ -11,7 +11,7 @@ pub struct Parser<'a> {
     pub tokens: Vec<TokenInfo<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token<'a> {
     Instr(usize),
     Text(&'a [u8]),
@@ -153,29 +153,36 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_absolute_mode(&mut self, number: u16) -> Result<Token<'a>, ParseError> {
+    fn parse_absolute_mode(&mut self, number: u16, is_absolute: bool) -> Result<Token<'a>, ParseError> {
         self.eat_spaces()?;
 
         if self.peek() == Ok(b',') {
+            self.eat()?; // Eat ,
             self.eat_spaces()?;
 
             match self.eat()? {
-                b'x' | b'X' => Ok(Token::Number(number, ModeType::AbsoluteX)),
-                b'y' | b'Y' => Ok(Token::Number(number, ModeType::AbsoluteY)),
+                b'x' | b'X' => Ok(Token::Number(number, match is_absolute {
+                    true => ModeType::AbsoluteX,
+                    false => ModeType::ZeroPageX
+                })),
+                b'y' | b'Y' => Ok(Token::Number(number, match is_absolute {
+                    true => ModeType::AbsoluteY,
+                    false => ModeType::ZeroPageY
+                })),
                 _ => Err(ParseError::InvalidNumberFormat),
             }
         } else {
-            Ok(Token::Number(number, ModeType::Absolute))
+            Ok(Token::Number(number, match is_absolute {
+                true => ModeType::Absolute,
+                false => ModeType::ZeroPage
+            }))
         }
     }
 
     fn parse_absolute_decimal(&mut self) -> Result<Token<'a>, ParseError> {
         let number = self.eat_decimal()?;
 
-        match number > 255 {
-            true => self.parse_absolute_mode(number),
-            false => Ok(Token::Number(number, ModeType::ZeroPage)),
-        }
+        self.parse_absolute_mode(number, number > 255)
     }
 
     fn parse_absolute_hex(&mut self) -> Result<Token<'a>, ParseError> {
@@ -186,12 +193,14 @@ impl<'a> Parser<'a> {
 
         match self.eat_hex() {
             Ok(low_number) => {
-                self.parse_absolute_mode(((high_number as u16) << 8) + low_number as u16)
+                /* Two byte */
+                self.parse_absolute_mode(((high_number as u16) << 8) + low_number as u16, true)
             }
             Err(_) => {
+                /* One byte */
                 self.end -= self.index - index;
                 self.index = index;
-                Ok(Token::Number(high_number as u16, ModeType::ZeroPage))
+                self.parse_absolute_mode(high_number as u16, false)
             }
         }
     }
@@ -204,12 +213,12 @@ impl<'a> Parser<'a> {
 
         match self.eat_binary() {
             Ok(low_number) => {
-                self.parse_absolute_mode(((high_number as u16) << 8) + low_number as u16)
+                self.parse_absolute_mode(((high_number as u16) << 8) + low_number as u16, true)
             }
             Err(_) => {
                 self.end -= self.index - index;
                 self.index = index;
-                Ok(Token::Number(high_number as u16, ModeType::ZeroPage))
+                self.parse_absolute_mode(high_number as u16, false)
             }
         }
     }
@@ -226,15 +235,24 @@ impl<'a> Parser<'a> {
             _ => return Err(ParseError::InvalidNumberFormat),
         };
 
-        let number = match number {
-            Token::Number(number, _) => number,
+        let (number, mode) = match number {
+            Token::Number(number, mode) => (number, mode),
             _ => return Err(ParseError::InvalidNumberFormat),
         };
+
+        if mode == ModeType::ZeroPageX { // parse_absolute_mode function parse it is as a ZeroPageX
+            self.eat_expected(b')', ParseError::InvalidNumberFormat)?;
+            return Ok(Token::Number(number, ModeType::IndirectX));
+        } 
+
+        if mode == ModeType::AbsoluteX { // parse_absolute_mode function parse it is as a ZeroPageX
+            return Err(ParseError::InvalidNumberFormat)
+        } 
 
         self.eat_spaces()?;
         let next_byte = self.eat()?;
         match next_byte {
-            b',' => {
+            b',' => { // This is not valid anymore, but lets keep it for maybe we will need it
                 self.eat_spaces()?;
                 let next_byte = self.eat()?;
                 if next_byte != b'X' && next_byte != b'x' {
@@ -247,6 +265,7 @@ impl<'a> Parser<'a> {
             b')' => {
                 self.eat_spaces()?;
                 self.eat_expected(b',', ParseError::InvalidNumberFormat)?;
+                self.eat_spaces()?;
 
                 let next_byte = self.eat()?;
                 if next_byte != b'Y' && next_byte != b'y' {
