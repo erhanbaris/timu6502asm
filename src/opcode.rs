@@ -21,12 +21,12 @@ pub struct ModeInfo {
     pub opcode: u8
 }
 
-pub const INSTS: [[u8; 3]; 56] = [
-    *b"ADC", *b"AND", *b"ASL", *b"BCC", *b"BCS", *b"BEQ", *b"BIT", *b"BMI", *b"BNE", *b"BPL", *b"BRK", *b"BVC", *b"BVS",
-    *b"CLC", *b"CLD", *b"CLI", *b"CLV", *b"CMP", *b"CPX", *b"CPY", *b"DEC", *b"DEX", *b"DEY", *b"EOR", *b"INC", *b"INX",
-    *b"INY", *b"JMP", *b"JSR", *b"LDA", *b"LDX", *b"LDY", *b"LSR", *b"NOP", *b"ORA", *b"PHA", *b"PHP", *b"PLA", *b"PLP",
-    *b"ROL", *b"ROR", *b"RTI", *b"RTS", *b"SBC", *b"SEC", *b"SED", *b"SEI", *b"STA", *b"STX", *b"STY", *b"TAX", *b"TAY",
-    *b"TSX", *b"TXA", *b"TXS", *b"TYA",
+pub const INSTS: [&[u8; 3]; 56] = [
+    b"ADC", b"AND", b"ASL", b"BCC", b"BCS", b"BEQ", b"BIT", b"BMI", b"BNE", b"BPL", b"BRK", b"BVC", b"BVS",
+    b"CLC", b"CLD", b"CLI", b"CLV", b"CMP", b"CPX", b"CPY", b"DEC", b"DEX", b"DEY", b"EOR", b"INC", b"INX",
+    b"INY", b"JMP", b"JSR", b"LDA", b"LDX", b"LDY", b"LSR", b"NOP", b"ORA", b"PHA", b"PHP", b"PLA", b"PLP",
+    b"ROL", b"ROR", b"RTI", b"RTS", b"SBC", b"SEC", b"SED", b"SEI", b"STA", b"STX", b"STY", b"TAX", b"TAY",
+    b"TSX", b"TXA", b"TXS", b"TYA",
 ];
 
 pub const INSTS_SIZE: [u8; 56] = [2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1];
@@ -92,3 +92,4 @@ pub const TYA_MODES: [ModeInfo; 1] = [ModeInfo { mode: ModeType::Implied, opcode
 
 pub const MODES: [&[ModeInfo]; 56] = [&ADC_MODES, &AND_MODES, &ASL_MODES, &BCC_MODES, &BCS_MODES, &BEQ_MODES, &BIT_MODES, &BMI_MODES, &BNE_MODES, &BPL_MODES, &BRK_MODES, &BVC_MODES, &BVS_MODES, &CLC_MODES, &CLD_MODES, &CLI_MODES, &CLV_MODES, &CMP_MODES, &CPX_MODES, &CPY_MODES, &DEC_MODES, &DEX_MODES, &DEY_MODES, &EOR_MODES, &INC_MODES, &INX_MODES, &INY_MODES, &JMP_MODES, &JSR_MODES, &LDA_MODES, &LDX_MODES, &LDY_MODES, &LSR_MODES, &NOP_MODES, &ORA_MODES, &PHA_MODES, &PHP_MODES, &PLA_MODES, &PLP_MODES, &ROL_MODES, &ROR_MODES, &RTI_MODES, &RTS_MODES, &SBC_MODES, &SEC_MODES, &SED_MODES, &SEI_MODES, &STA_MODES, &STX_MODES, &STY_MODES, &TAX_MODES, &TAY_MODES, &TSX_MODES, &TXA_MODES, &TXS_MODES, &TYA_MODES];
 pub const BRANCH_INSTS: [usize; 8] = [3, 4, 5, 7, 8, 9, 11, 12];
+pub const JUMP_INSTS: [usize; 2] = [27, 28];

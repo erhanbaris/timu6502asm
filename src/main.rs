@@ -2,6 +2,7 @@ mod opcode;
 mod parser;
 mod code_gen;
 mod ast;
+mod options;
 #[cfg(test)]
 mod tests;
 
@@ -11,17 +12,7 @@ use parser::Parser;
 
 
 fn main() {
-    let data = br#"LDX #$08
-decrement:
-DEX
-STX $0200
-CPX #$03
-BNE decrement
-BNE decrement2
-STX $0201
-decrement2:
-STX $0201
-BRK"#;
+    let data = br#".INCBIN "test""#;
     let mut parser = Parser::new(data);
     parser.parse().unwrap();
     parser.friendly_dump();
