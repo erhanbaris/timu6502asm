@@ -111,6 +111,14 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
+    fn eat_string(&self) -> Result<&'a [u8], AstGeneratorError> {
+        let token = self.eat()?;
+        match token.token {
+            Token::String(string) => Ok(string),
+            _ => Err(AstGeneratorError::syntax_issue(token, "Expected string"))
+        }
+    }
+
     fn eat_text(&self) -> Result<&'a [u8], AstGeneratorError> {
         let token = self.eat()?;
         match token.token {
@@ -122,19 +130,32 @@ impl<'a> AstGenerator<'a> {
     fn generate_compiler_option(&self, token: &TokenInfo, option: &'a [u8]) -> Result<(), AstGeneratorError> {
         if let Some(position) = OPTIONS.iter().position(|item| *item == option) {
             let modes = OPTION_MODES[position];
+            let compiler_option_type = OPTION_ENUMS[position];
+            let mut found = false;
+
+            self.cleanup_space()?;
 
             for mode in modes.iter() {
+
+                
                 match mode {
                     CompilerValueType::Number => {
-                        let compiler_option_type = OPTION_ENUMS[position];
-                        self.cleanup_space()?;
-                        let (number, mode) = self.eat_number()?;
-                        self.asts.borrow_mut().push(Ast::CompilerOption(compiler_option_type, CompilerValue::Number(number, mode)));
+                        if let Ok((number, mode)) = self.eat_number() {
+                            self.asts.borrow_mut().push(Ast::CompilerOption(compiler_option_type, CompilerValue::Number(number, mode)));
+                            found = true;
+                        }
                     },
-                    CompilerValueType::String => todo!(),
-                }
-                
-                break;
+                    CompilerValueType::String => {
+                        if let Ok(string) = self.eat_string() {
+                            self.asts.borrow_mut().push(Ast::CompilerOption(compiler_option_type, CompilerValue::String(string)));
+                            found = true;
+                        }
+                    },
+                }                
+            }
+
+            if !found {
+                return Err(AstGeneratorError::syntax_issue(token, "Missing information"))
             }
         } else {
             return Err(AstGeneratorError::syntax_issue(token, "Unsupported compiler configuration"))

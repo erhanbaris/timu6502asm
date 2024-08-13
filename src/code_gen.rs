@@ -1,11 +1,21 @@
-use std::{cell::{Cell, RefCell}, collections::HashMap};
+use std::{cell::{Cell, RefCell}, collections::HashMap, ffi::OsStr, os::unix::ffi::OsStrExt};
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
+use thiserror::Error;
 
 use crate::{ast::Ast, opcode::{ModeType, MODES}, options::{CompilerOptionEnum, CompilerValue}};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum CodeGeneratorError {
+    #[error("Number not applicable")]
     NumberNotApplicable,
-    UnresolvedBranches
+    #[error("Branch information not found")]
+    UnresolvedBranches,
+    #[error("Expected string")]
+    StringExpected,
+    #[error("IO Error {0}")]
+    IOError(#[from] std::io::Error)
 }
 
 #[derive(Debug)]
@@ -138,7 +148,28 @@ impl<'a> CodeGenerator<'a> {
     fn configure_compiler(&self, option: CompilerOptionEnum, value: CompilerValue<'a>) -> Result<(), CodeGeneratorError> {
         match option {
             CompilerOptionEnum::Org => self.start_point.set(value.as_u16()),
-            CompilerOptionEnum::Incbin => todo!(),
+            CompilerOptionEnum::Incbin => {
+
+                let file_path = match value {
+                    CompilerValue::String(name) => name,
+                    _ => return Err(CodeGeneratorError::StringExpected)
+                };
+                
+                let file = match File::open(OsStr::from_bytes(file_path)) {
+                    Ok(file) => file,
+                    Err(error) => return Err(CodeGeneratorError::IOError(error))
+                };
+
+                let mut data = self.data.borrow_mut();
+
+                let buffer_reader: BufReader<File> = BufReader::new(file);
+                for buffer in buffer_reader.bytes() {
+                    match buffer {
+                        Ok(byte) => data.push(byte),
+                        Err(error) => return Err(CodeGeneratorError::IOError(error))
+                    }
+                }
+            },
         };
         Ok(())
     }

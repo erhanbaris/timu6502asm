@@ -446,7 +446,7 @@ impl<'a> Parser<'a> {
         }
 
         self.eat_expected(b'"', ParseError::InvalidString)?;
-        Ok(Token::String(&self.data[start..self.index]))
+        Ok(Token::String(&self.data[start..self.index-1]))
     }
 
     fn parse_compiler_options(&mut self) -> Result<Token<'a>, ParseError> {

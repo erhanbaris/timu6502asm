@@ -162,3 +162,19 @@ fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     generator.generate().unwrap();
     assert_eq!(generator.data.take(), codes);
 }
+
+#[rstest]
+#[case(br#".INCBIN "src/tests/bins/test1.bin""#, &[0x00, 0x01, 0x02, 0x03])]
+fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
+  let mut parser = Parser::new(data);
+  parser.parse().unwrap();
+  parser.friendly_dump();
+
+  let ast_generator = AstGenerator::new(parser.tokens);
+  ast_generator.generate().unwrap();
+
+  let generator = CodeGenerator::new(ast_generator.asts.take());
+  generator.generate().unwrap();
+  generator.dump();
+  assert_eq!(generator.data.take(), binary);
+}

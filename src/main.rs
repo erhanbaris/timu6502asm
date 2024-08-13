@@ -12,7 +12,7 @@ use parser::Parser;
 
 
 fn main() {
-    let data = br#".INCBIN "test""#;
+    let data = br#".INCBIN "src/tests/bins/test1.bin""#;
     let mut parser = Parser::new(data);
     parser.parse().unwrap();
     parser.friendly_dump();
