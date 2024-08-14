@@ -1,4 +1,4 @@
-use strum_macros::{EnumDiscriminants, EnumIter, EnumString};
+use strum_macros::EnumDiscriminants;
 
 use crate::opcode::ModeType;
 

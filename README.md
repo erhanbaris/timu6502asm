@@ -35,7 +35,7 @@ Expected output:
 
 There are many things to do. Here are the some todos:
  - [ ] Case insensitivity
- - [ ] Generate binary
+ - [ ] Rom file generation
  - [ ] Decompile binaries
  - [ ] Human friendly prints
  - [ ] Import different asm files

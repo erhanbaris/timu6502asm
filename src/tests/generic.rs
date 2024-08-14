@@ -1,6 +1,6 @@
 use rstest::*;
 
-use crate::{ast::AstGenerator, code_gen::CodeGenerator, parser::Parser};
+use crate::{ast::AstGenerator, code_gen::CodeGenerator, context::Context, parser::Parser};
 
 #[rstest]
 #[case(br#"LDX #$08
@@ -42,14 +42,20 @@ decrement2:
 STX $0201
 BRK"#)]
 fn compile_test(#[case] data: &'_ [u8]) {
-    let mut parser = Parser::new(data);
+    let context = Context::new(data);
+
+    let mut parser = Parser::new(context);
     parser.parse().unwrap();
+    parser.friendly_dump();
 
-    let ast_generator = AstGenerator::new(parser.tokens);
-    ast_generator.generate().unwrap();
+    let context = parser.context;
 
-    let generator = CodeGenerator::new(ast_generator.asts.take());
-    generator.generate().unwrap();
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    let context = generator.generate(context).unwrap();
+    generator.dump(&context);    
 }
 
 /*
@@ -152,29 +158,39 @@ RTS
 end:
 BRK"#, &[0x20, 0x09, 0x06, 0x20, 0x0c, 0x06, 0x20, 0x12, 0x06, 0xa2, 0x00, 0x60, 0xe8, 0xe0, 0x05, 0xd0, 0xfb, 0x60, 0x00])]
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
-    let mut parser = Parser::new(data);
+    let context = Context::new(data);
+
+    let mut parser = Parser::new(context);
     parser.parse().unwrap();
+    parser.friendly_dump();
 
-    let ast_generator = AstGenerator::new(parser.tokens);
-    ast_generator.generate().unwrap();
+    let context = parser.context;
 
-    let generator = CodeGenerator::new(ast_generator.asts.take());
-    generator.generate().unwrap();
-    assert_eq!(generator.data.take(), codes);
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    let context = generator.generate(context).unwrap();
+    generator.dump(&context);
+    assert_eq!(context.target, codes);
 }
 
 #[rstest]
 #[case(br#".INCBIN "src/tests/bins/test1.bin""#, &[0x00, 0x01, 0x02, 0x03])]
 fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
-  let mut parser = Parser::new(data);
-  parser.parse().unwrap();
-  parser.friendly_dump();
+    let context = Context::new(data);
 
-  let ast_generator = AstGenerator::new(parser.tokens);
-  ast_generator.generate().unwrap();
+    let mut parser = Parser::new(context);
+    parser.parse().unwrap();
+    parser.friendly_dump();
 
-  let generator = CodeGenerator::new(ast_generator.asts.take());
-  generator.generate().unwrap();
-  generator.dump();
-  assert_eq!(generator.data.take(), binary);
+    let context = parser.context;
+
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    let context = generator.generate(context).unwrap();
+    generator.dump(&context);
+  assert_eq!(context.target, binary);
 }

@@ -1,6 +1,6 @@
 use rstest::*;
 
-use crate::{opcode::ModeType, parser::{Parser, Token}};
+use crate::{context::Context, opcode::ModeType, parser::{Parser, Token}};
 
 #[rstest]
 // Hex numbers
@@ -54,11 +54,12 @@ use crate::{opcode::ModeType, parser::{Parser, Token}};
 #[case(b"(40960)", Token::Number(0xa000, ModeType::Indirect))]
 #[case(b"( 40960 )", Token::Number(0xA000, ModeType::Indirect))]
 fn number_check(#[case] data: &'_ [u8], #[case] token: Token<'_>) {
-    let mut parser = Parser::new(data);
+    let context = Context::new(data);
+    let mut parser = Parser::new(context);
     parser.parse().unwrap();
-    assert_eq!(parser.tokens.len(), 2);
-    assert_eq!(parser.tokens[0].token, token);
-    assert_eq!(parser.tokens[1].token, Token::End);
+    assert_eq!(parser.context.tokens.borrow().len(), 2);
+    assert_eq!(parser.context.tokens.borrow()[0].token, token);
+    assert_eq!(parser.context.tokens.borrow()[1].token, Token::End);
 }
 
 #[rstest]
@@ -85,9 +86,10 @@ fn number_check(#[case] data: &'_ [u8], #[case] token: Token<'_>) {
 #[case(b"($a000", 0)]
 #[case(b"$a000)", 0)]
 fn invalid_number_check(#[case] data: &'_ [u8], #[case] count: usize) {
-    let mut parser = Parser::new(data);
+    let context = Context::new(data);
+    let mut parser = Parser::new(context);
     if let Ok(_) = parser.parse() {
-        assert_eq!(parser.tokens.len(), count);
+        assert_eq!(parser.context.tokens.borrow().len(), count);
     }
 }
 
@@ -98,10 +100,11 @@ fn invalid_number_check(#[case] data: &'_ [u8], #[case] count: usize) {
 #[case(b";''''''")]
 #[case(b";;;;;;;;;;;;;")]
 fn check_comment(#[case] data: &'_ [u8]) {
-    let mut parser = Parser::new(data);
+    let context = Context::new(data);
+    let mut parser = Parser::new(context);
     parser.parse().unwrap();
-    assert_eq!(parser.tokens.len(), 2);
-    if let Token::Comment(_) = parser.tokens[0].token {
+    assert_eq!(parser.context.tokens.borrow().len(), 2);
+    if let Token::Comment(_) = parser.context.tokens.borrow()[0].token {
         return
     }
 

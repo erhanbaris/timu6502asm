@@ -1,4 +1,5 @@
-use crate::opcode::{ModeType, INSTS};
+use crate::{context::Context, opcode::{ModeType, INSTS}, tool::{print_error, upper_case_byte}};
+use strum_macros::EnumDiscriminants;
 
 /*
 Address Modes
@@ -20,23 +21,26 @@ zpg,Y	zeropage, Y-indexed	OPC $LL,Y	operand is zeropage address; effective addre
 
 #[derive(Debug)]
 pub struct Parser<'a> {
-    data: &'a [u8],
     pub index: usize,
     pub line: usize,
     pub column: usize,
     pub end: usize,
     size: usize,
-    pub tokens: Vec<TokenInfo<'a>>,
+    pub context: Context<'a>
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(EnumDiscriminants)]
+#[strum_discriminants(name(TokenType))]
 pub enum Token<'a> {
     Instr(usize),
     Keyword(&'a [u8]),
     String(&'a [u8]),
     CompilerOption(&'a [u8]),
     Comment(&'a [u8]),
+    Assign,
     Branch(&'a [u8]),
+    BranchNext(&'a [u8]),
     Number(u16, ModeType),
     NewLine(usize),
     Space(usize),
@@ -54,6 +58,7 @@ pub struct TokenInfo<'a> {
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
     OutOfScope,
+    UnexpectedSymbol,
     UnknownToken,
     InvalidNumberFormat,
     InvalidCommentFormat,
@@ -63,20 +68,21 @@ pub enum ParseError {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
+    pub fn new(context: Context<'a>) -> Self {
+        let size = context.source.len();
+
         Self {
-            data,
             index: 0,
             line: 0,
             column: 0,
             end: 0,
-            size: data.len(),
-            tokens: Vec::new(),
+            size,
+            context
         }
     }
 
     fn add_token(&mut self, token: Token<'a>) {
-        self.tokens.push(TokenInfo {
+        self.context.tokens.borrow_mut().push(TokenInfo {
             line: self.line,
             column: self.column,
             end: self.end,
@@ -84,7 +90,7 @@ impl<'a> Parser<'a> {
         });
     }
 
-    pub fn parse(&mut self) -> Result<(), ParseError> {
+    fn inner_parse(&mut self) -> Result<(), ParseError> {
         while self.size > self.index {
             let mut total_lines = 0;
             let token = self.next()?;
@@ -107,14 +113,24 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    pub fn parse(&mut self) -> Result<(), ParseError> {
+        match self.inner_parse() {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                print_error(&self.context.source, &error, self.line, self.column, self.end);
+                Err(error)
+            }
+        }
+    }
+
     fn peek(&mut self) -> Result<u8, ParseError> {
         self.empty_check()?;
-        Ok(self.data[self.index])
+        Ok(self.context.source[self.index])
     }
 
     fn peek2(&mut self) -> Result<u8, ParseError> {
         self.empty_check2()?;
-        Ok(self.data[self.index+1])
+        Ok(self.context.source[self.index+1])
     }
 
     fn peek_expected(&mut self, byte: u8, error: ParseError) -> Result<(), ParseError> {
@@ -128,7 +144,7 @@ impl<'a> Parser<'a> {
         self.empty_check()?;
         self.index += 1;
         self.end += 1;
-        Ok(self.data[self.index - 1])
+        Ok(self.context.source[self.index - 1])
     }
 
     fn eat_expected(&mut self, byte: u8, error: ParseError) -> Result<(), ParseError> {
@@ -187,6 +203,7 @@ impl<'a> Parser<'a> {
             b'.' => self.parse_compiler_options(),
             b'"' => self.parse_string(),
             b';' => self.parse_comment(),
+            b'=' => self.parse_assign(),
             b'\r' | b'\n' => self.parse_newline(),
             b' ' | b'\t' => self.parse_whitespace(),
             n => {
@@ -410,17 +427,17 @@ impl<'a> Parser<'a> {
         }
 
         if branch {
-            return Ok(Token::Branch(&self.data[start..self.index - 1]));
+            return Ok(Token::Branch(&self.context.source[start..self.index - 1]));
         }
 
         if self.index - start == 3 {
-            let search_insts: [u8; 3] = [self.data[start], self.data[start + 1], self.data[start + 2]];
+            let search_insts: [u8; 3] = [upper_case_byte(self.context.source[start]), upper_case_byte(self.context.source[start + 1]), upper_case_byte(self.context.source[start + 2])];
             if let Some(position) = INSTS.iter().position(|item| *item == &search_insts) {
                 return Ok(Token::Instr(position));
             }
         }
 
-        Ok(Token::Keyword(&self.data[start..self.index]))
+        Ok(Token::Keyword(&self.context.source[start..self.index]))
     }
 
     fn parse_string(&mut self) -> Result<Token<'a>, ParseError> {
@@ -446,7 +463,7 @@ impl<'a> Parser<'a> {
         }
 
         self.eat_expected(b'"', ParseError::InvalidString)?;
-        Ok(Token::String(&self.data[start..self.index-1]))
+        Ok(Token::String(&self.context.source[start..self.index-1]))
     }
 
     fn parse_compiler_options(&mut self) -> Result<Token<'a>, ParseError> {
@@ -454,6 +471,7 @@ impl<'a> Parser<'a> {
         let start = self.index;
 
         let mut valid = false;
+        let mut branch = false;
 
         loop {
             match self.peek() {
@@ -463,6 +481,10 @@ impl<'a> Parser<'a> {
                         b'a'..=b'z' => valid = true,
                         b'A'..=b'Z' => valid = true,
                         b'_' => (),
+                        b':' => {
+                            branch = true;
+                            break;
+                        },
                         b' ' | b'\t' | b'\n' | b'\r' => break,
                         _ => return Err(ParseError::InvalidCompilerOption),
                     };
@@ -477,7 +499,11 @@ impl<'a> Parser<'a> {
             return Err(ParseError::InvalidCompilerOption);
         }
 
-        Ok(Token::CompilerOption(&self.data[start..self.index]))
+        if branch {
+            return Ok(Token::BranchNext(&self.context.source[start..self.index - 1]));
+        }
+
+        Ok(Token::CompilerOption(&self.context.source[start..self.index]))
     }
 
     fn parse_comment(&mut self) -> Result<Token<'a>, ParseError> {
@@ -496,7 +522,12 @@ impl<'a> Parser<'a> {
                 _ => return Err(ParseError::InvalidCommentFormat),
             };
         }
-        Ok(Token::Comment(&self.data[start..self.index - 1]))
+        Ok(Token::Comment(&self.context.source[start..self.index - 1]))
+    }
+
+    fn parse_assign(&mut self) -> Result<Token<'a>, ParseError> {
+        self.eat_expected(b'=', ParseError::UnexpectedSymbol)?;
+        Ok(Token::Assign)
     }
 
     fn parse_newline(&mut self) -> Result<Token<'a>, ParseError> {
@@ -527,28 +558,30 @@ impl<'a> Parser<'a> {
     pub fn friendly_dump(&self) {
         let mut line = 0;
 
-        print!("{}. ", line);
-        for ast in self.tokens.iter() {
+        print!("{:>5}. ", line);
+        for ast in self.context.tokens.borrow().iter() {
             let type_name = match ast.token {
-                Token::Instr(_) => "INS",
-                Token::Keyword(_) => "KEY",
-                Token::CompilerOption(_) => "OPT",
-                Token::Comment(_) => "COM",
-                Token::Branch(_) => "BRN",
-                Token::Number(_, _) => "NUM",
-                Token::NewLine(_) => "NLN",
-                Token::Space(_) => "SPA",
+                Token::Instr(_) => "INSTR",
+                Token::Keyword(_) => "KEYWORD",
+                Token::CompilerOption(_) => "OPTION",
+                Token::Comment(_) => "COMMENT",
+                Token::Branch(_) => "BRANCH",
+                Token::Number(_, _) => "NUMBER",
+                Token::NewLine(_) => "NEWLINE",
+                Token::Space(_) => "SPACE",
                 Token::End => "END",
-                Token::String(_) => "STR"
+                Token::String(_) => "STRING",
+                Token::BranchNext(_) => "BRANCHNEXT",
+                Token::Assign => "ASSIGN",
             };
 
             if ast.line != line {
                 println!();
                 line = ast.line;
-                print!("{}. ", line);
+                print!("{:>5}. ", line);
             }
 
-            print!("[{}:{}]{} ", ast.column, ast.end, type_name);
+            print!("[{:>2}:{:<2} {:^10}] ", ast.column, ast.end, type_name);
         }
         println!();
     }
