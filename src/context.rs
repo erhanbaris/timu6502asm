@@ -19,20 +19,7 @@ impl<'a> Context<'a> {
             tokens: Default::default()
         }
     }
-
-    pub fn add_token(&self, token_index: usize, ast: Ast<'a>) {
-        let token_info = &self.tokens.borrow()[token_index];
-
-        let info = AstInfo {
-            line: token_info.line,
-            column: token_info.column,
-            end: token_info.end,
-            ast
-        };
-
-        self.asts.borrow_mut().push(info);
-    }
-
+    
     pub fn add_ast(&self, token_index: usize, ast: Ast<'a>) {
         let token_info = &self.tokens.borrow()[token_index];
 

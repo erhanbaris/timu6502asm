@@ -157,6 +157,11 @@ RTS
 
 end:
 BRK"#, &[0x20, 0x09, 0x06, 0x20, 0x0c, 0x06, 0x20, 0x12, 0x06, 0xa2, 0x00, 0x60, 0xe8, 0xe0, 0x05, 0xd0, 0xfb, 0x60, 0x00])]
+#[case(br#"IOSAVE          = $FF4A ; save the A, X, and Y registers
+IOREST          = $FF3F ; restore the A, X, and Y registers
+
+lda IOSAVE
+LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::new(data);
 
@@ -192,5 +197,38 @@ fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
     generator.dump(&context);
-  assert_eq!(context.target, binary);
+    assert_eq!(context.target, binary);
+}
+
+#[rstest]
+#[case(br#"init :"#)]
+#[case(br#"1-1 :"#)]
+#[case(br#"- :"#)]
+#[case(br#"= :"#)]
+#[case(br#"? :"#)]
+fn parser_fail(#[case] data: &'_ [u8]) {
+    let context = Context::new(data);
+    let mut parser = Parser::new(context);
+    assert!(parser.parse().is_err());
+}
+
+
+#[rstest]
+#[case(br#".INCBIN"#)]
+#[case(br#"BNE"#)]
+#[case(br#"BNE BNE"#)]
+#[case(br#"BNE 11111"#)]
+#[case(br#"BNE "Hello""#)]
+#[case(br#"BNE  = "Hello""#)]
+#[case(br#".fBNE  = "Hello""#)]
+fn ast_generator_fail(#[case] data: &'_ [u8]) {
+  let context = Context::new(data);
+  let mut parser = Parser::new(context);
+  parser.parse().unwrap();
+  parser.friendly_dump();
+
+  let context = parser.context;
+
+  let ast_generator = AstGenerator::new();
+  assert!(ast_generator.generate(context).is_err());
 }

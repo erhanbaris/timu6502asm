@@ -282,18 +282,18 @@ impl<'a> CodeGenerator<'a> {
     }
 
     pub fn dump(&self, context: &Context<'a>) {
-        let total_byte_per_row = 16;
+        let total_byte_per_row = 8;
         let position = self.start_point;
         let mut index = 0;
 
-        print!("{:04x}: ", position);
+        print!("{:04X}: ", position);
         for data in context.target.iter() {
-            print!("{:02x} ", data);
+            print!("{:02X} ", data);
             index += 1;
             
             if index % total_byte_per_row == 0 {
                 println!();
-                print!("{:04x}: ", position + index);
+                print!("{:04X}: ", position + index);
         
             }
         }
