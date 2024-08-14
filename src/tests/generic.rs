@@ -162,6 +162,9 @@ IOREST          = $FF3F ; restore the A, X, and Y registers
 
 lda IOSAVE
 LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
+#[case(br#".byte "abcd""#, &[0x61, 0x62, 0x63, 0x64])]
+#[case(br#".byte $ff"#, &[0xFF])]
+#[case(br#".byte $ff .byte "abcd""#, &[0xFF, 0x61, 0x62, 0x63, 0x64])]
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::new(data);
 

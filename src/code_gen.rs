@@ -7,7 +7,7 @@ use strum_macros::EnumDiscriminants;
 
 use crate::context::Context;
 use crate::tool::print_error;
-use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, options::{CompilerOptionEnum, CompilerValue}};
+use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, options::{DirectiveEnum, DirectiveValue}};
 
 #[derive(Error, Debug)]
 pub enum CodeGeneratorError {
@@ -26,7 +26,9 @@ pub enum CodeGeneratorError {
     #[error("IO Error ({0})")]
     IOError(#[from] std::io::Error),
     #[error("Text convertion issue ({0})")]
-    Utf8Error(#[from] Utf8Error)
+    Utf8Error(#[from] Utf8Error),
+    #[error("Unsupported number format")]
+    UnsupportedNumberFormat
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -209,13 +211,13 @@ impl<'a> CodeGenerator<'a> {
         Ok(())
     }
 
-    fn configure_compiler(&mut self, target: &mut Vec<u8>, option: CompilerOptionEnum, value: CompilerValue<'a>) -> Result<(), CodeGeneratorError> {
+    fn configure_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, value: DirectiveValue<'a>) -> Result<(), CodeGeneratorError> {
         match option {
-            CompilerOptionEnum::Org => self.start_point = value.as_u16(),
-            CompilerOptionEnum::Incbin => {
+            DirectiveEnum::Org => self.start_point = value.as_u16(),
+            DirectiveEnum::Incbin => {
 
                 let file_path = match value {
-                    CompilerValue::String(name) => name,
+                    DirectiveValue::String(name) => name,
                     _ => return Err(CodeGeneratorError::StringExpected)
                 };
 
@@ -237,6 +239,18 @@ impl<'a> CodeGenerator<'a> {
                     }
                 }
             },
+            DirectiveEnum::Byte => {
+                match value {
+                    DirectiveValue::String(value) => value.into_iter().for_each(|byte| target.push(*byte)),
+                    DirectiveValue::Number(number, mode) => {
+                        match mode {
+                            ModeType::Relative | ModeType::Absolute => self.push_number(target, number, mode)?,
+                            ModeType::ZeroPage => self.push_number(target, number, mode)?,
+                            _ => return Err(CodeGeneratorError::UnsupportedNumberFormat)
+                        }
+                    }
+                };
+            },
         };
         Ok(())
     }
@@ -256,7 +270,7 @@ impl<'a> CodeGenerator<'a> {
                 Some(Ast::Instr(position, number, mode)) => self.generate_instr(&mut context.target, *position, *number, *mode)?,
                 Some(Ast::InstrRef(position, reference)) => self.generate_instr_reference(&mut context.target, *position, *reference)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
-                Some(Ast::CompilerOption(option, value)) => self.configure_compiler(&mut context.target, *option, *value)?,
+                Some(Ast::Directive(option, value)) => self.configure_directive(&mut context.target, *option, *value)?,
                 Some(Ast::Assign(name, number, mode)) => self.configure_assign(*name, *number, *mode)?,
                 None => return Err(CodeGeneratorError::InternalError)
             };

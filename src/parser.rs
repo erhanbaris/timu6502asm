@@ -36,7 +36,7 @@ pub enum Token<'a> {
     Instr(usize),
     Keyword(&'a [u8]),
     String(&'a [u8]),
-    CompilerOption(&'a [u8]),
+    Directive(&'a [u8]),
     Comment(&'a [u8]),
     Assign,
     Branch(&'a [u8]),
@@ -63,7 +63,7 @@ pub enum ParseError {
     InvalidNumberFormat,
     InvalidCommentFormat,
     InvalidKeyword,
-    InvalidCompilerOption,
+    InvalidDirective,
     InvalidString
 }
 
@@ -200,7 +200,7 @@ impl<'a> Parser<'a> {
             b'(' => self.parse_indirect(),
             b'#' => self.parse_immediate(),
             b'a'..=b'z' | b'A'..=b'Z' => self.parse_keyword(),
-            b'.' => self.parse_compiler_options(),
+            b'.' => self.parse_directive(),
             b'"' => self.parse_string(),
             b';' => self.parse_comment(),
             b'=' => self.parse_assign(),
@@ -466,8 +466,8 @@ impl<'a> Parser<'a> {
         Ok(Token::String(&self.context.source[start..self.index-1]))
     }
 
-    fn parse_compiler_options(&mut self) -> Result<Token<'a>, ParseError> {
-        self.eat_expected(b'.', ParseError::InvalidCompilerOption)?;
+    fn parse_directive(&mut self) -> Result<Token<'a>, ParseError> {
+        self.eat_expected(b'.', ParseError::InvalidDirective)?;
         let start = self.index;
 
         let mut valid = false;
@@ -486,24 +486,24 @@ impl<'a> Parser<'a> {
                             break;
                         },
                         b' ' | b'\t' | b'\n' | b'\r' => break,
-                        _ => return Err(ParseError::InvalidCompilerOption),
+                        _ => return Err(ParseError::InvalidDirective),
                     };
                     self.eat()?;
                 }
                 Err(ParseError::OutOfScope) => break,
-                _ => return Err(ParseError::InvalidCompilerOption),
+                _ => return Err(ParseError::InvalidDirective),
             };
         }
 
         if !valid {
-            return Err(ParseError::InvalidCompilerOption);
+            return Err(ParseError::InvalidDirective);
         }
 
         if branch {
             return Ok(Token::BranchNext(&self.context.source[start..self.index - 1]));
         }
 
-        Ok(Token::CompilerOption(&self.context.source[start..self.index]))
+        Ok(Token::Directive(&self.context.source[start..self.index]))
     }
 
     fn parse_comment(&mut self) -> Result<Token<'a>, ParseError> {
@@ -563,7 +563,7 @@ impl<'a> Parser<'a> {
             let type_name = match ast.token {
                 Token::Instr(_) => "INSTR",
                 Token::Keyword(_) => "KEYWORD",
-                Token::CompilerOption(_) => "OPTION",
+                Token::Directive(_) => "OPTION",
                 Token::Comment(_) => "COMMENT",
                 Token::Branch(_) => "BRANCH",
                 Token::Number(_, _) => "NUMBER",

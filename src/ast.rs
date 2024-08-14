@@ -1,6 +1,6 @@
 use std::{cell::Cell, marker::PhantomData};
 
-use crate::{context::Context, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, options::{CompilerOptionEnum, CompilerValue, CompilerValueType, OPTIONS, OPTION_ENUMS, OPTION_MODES}, parser::{Token, TokenInfo}, tool::{print_error, upper_case}};
+use crate::{context::Context, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, options::{DirectiveEnum, DirectiveType, DirectiveValue, DIRECTIVE_ENUMS, OPTIONS, OPTION_MODES}, parser::{Token, TokenInfo, TokenType}, tool::{print_error, upper_case}};
 
 #[derive(Debug, Copy, Clone)]
 pub enum BranchType {
@@ -16,7 +16,7 @@ pub enum Ast<'a> {
     Instr(usize, u16, ModeType),
     InstrRef(usize, &'a [u8]),
     Branch(&'a [u8], BranchType),
-    CompilerOption(CompilerOptionEnum, CompilerValue<'a>),
+    Directive(DirectiveEnum, DirectiveValue<'a>),
     Assign(&'a [u8], u16, ModeType)
 }
 
@@ -81,10 +81,16 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
-    fn eat(&self)-> Result<usize, AstGeneratorError> {
+    fn eat(&self) -> Result<usize, AstGeneratorError> {
         self.empty_check()?;
         self.index.set(self.index.get() + 1);
         Ok(self.index.get() - 1)
+    }
+
+    fn dec(&self) -> Result<(), AstGeneratorError> {
+        self.empty_check()?;
+        self.index.set(self.index.get() - 1);
+        Ok(())
     }
 
     fn peek(&self)-> Result<usize, AstGeneratorError> {
@@ -108,6 +114,42 @@ impl<'a> AstGenerator<'a> {
             let _ = self.eat();
         }
         Ok(())
+    }
+
+    fn eat_if(&self, context: &Context<'a>, expected: TokenType) -> Option<usize> {
+        let token_index = match self.peek() {
+            Ok(token_index) => token_index,
+            Err(_) => return None
+        };
+
+        let token = &context.tokens.borrow()[token_index];
+        let token_type: TokenType = TokenType::from(token.token);
+        
+        match token_type == expected {
+            true => {
+                self.index.set(self.index.get() + 1);
+                Some(token_index)
+            }
+            false => None
+        }
+    }
+
+    fn eat_if_string(&self, context: &Context<'a>) -> Option<&'a [u8]> {
+        let index = self.eat_if(context, TokenType::String)?;
+        let token = &context.tokens.borrow()[index];
+        match token.token {
+            Token::String(string) => Some(string),
+            _ => None
+        }
+    }
+
+    fn eat_if_number(&self, context: &Context<'a>) -> Option<(u16, ModeType)> {
+        let index = self.eat_if(context, TokenType::Number)?;
+        let token = &context.tokens.borrow()[index];
+        match token.token {
+            Token::Number(number, mode) => Some((number, mode)),
+            _ => None
+        }
     }
 
     fn eat_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
@@ -146,27 +188,27 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
-    fn generate_compiler_option(&self, context: &Context<'a>, token_index: usize, option: &'a [u8]) -> Result<(), AstGeneratorError> {
+    fn generate_directive(&self, context: &Context<'a>, token_index: usize, option: &'a [u8]) -> Result<(), AstGeneratorError> {
         let option = upper_case(option);
         if let Some(position) = OPTIONS.iter().position(|item| *item == &option[..]) {
             let modes = OPTION_MODES[position];
-            let compiler_option_type = OPTION_ENUMS[position];
+            let directive_type = DIRECTIVE_ENUMS[position];
             let mut found = false;
 
             self.cleanup_space(context)?;
 
             for mode in modes.iter() {
                 match mode {
-                    CompilerValueType::Number => {
-                        if let Ok((number, mode)) = self.eat_number(context) {
-                            context.add_ast(token_index, Ast::CompilerOption(compiler_option_type, CompilerValue::Number(number, mode)));
+                    DirectiveType::Number => {
+                        if let Some((number, mode)) = self.eat_if_number(context) {
+                            context.add_ast(token_index, Ast::Directive(directive_type, DirectiveValue::Number(number, mode)));
                             found = true;
                             break;
                         }
                     },
-                    CompilerValueType::String => {
-                        if let Ok(string) = self.eat_string(context) {
-                            context.add_ast(token_index,Ast::CompilerOption(compiler_option_type, CompilerValue::String(string)));
+                    DirectiveType::String => {
+                        if let Some(string) = self.eat_if_string(context) {
+                            context.add_ast(token_index,Ast::Directive(directive_type, DirectiveValue::String(string)));
                             found = true;
                             break;
                         }
@@ -251,7 +293,7 @@ impl<'a> AstGenerator<'a> {
             match &context.tokens.borrow().get(token_index).map(|item| item.token) {
                 Some(Token::Instr(positon)) => self.generate_code_block(&context, token_index, *positon)?,
                 Some(Token::Keyword(keyword)) => self.generate_assign(&context, token_index, keyword)?,
-                Some(Token::CompilerOption(option)) => self.generate_compiler_option(&context, token_index, option)?,
+                Some(Token::Directive(option)) => self.generate_directive(&context, token_index, option)?,
                 Some(Token::Comment(_)) => (),
                 Some(Token::Branch(name)) => self.generate_branch(&context, token_index, name, BranchType::Generic)?,
                 Some(Token::Number(_, _)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Number not expected")),
