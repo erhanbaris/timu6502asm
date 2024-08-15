@@ -30,6 +30,8 @@ pub const INSTS: [&[u8; 3]; 56] = [
 ];
 
 pub const INSTS_SIZE: [u8; 56] = [2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1];
+
+#[allow(unused_variables)]
 pub const INSTR_NAMES: [&str; 56] = ["ADC", "AND", "ASL", "BCC", "BCS", "BEQ", "BIT", "BMI", "BNE", "BPL", "BRK", "BVC", "BVS", "CLC", "CLD", "CLI", "CLV", "CMP", "CPX", "CPY", "DEC", "DEX", "DEY", "EOR", "INC", "INX", "INY", "JMP", "JSR", "LDA", "LDX", "LDY", "LSR", "NOP", "ORA", "PHA", "PHP", "PLA", "PLP", "ROL", "ROR", "RTI", "RTS", "SBC", "SEC", "SED", "SEI", "STA", "STX", "STY", "TAX", "TAY", "TSX", "TXA", "TXS", "TYA"];
 
 pub const ADC_MODES: [ModeInfo; 8] = [ModeInfo { mode: ModeType::Immediate, opcode: 0x69}, ModeInfo { mode: ModeType::ZeroPage, opcode: 0x65}, ModeInfo { mode: ModeType::ZeroPageX, opcode: 0x75}, ModeInfo { mode: ModeType::Absolute, opcode: 0x6D}, ModeInfo { mode: ModeType::AbsoluteX, opcode: 0x7D}, ModeInfo { mode: ModeType::AbsoluteY, opcode: 0x79}, ModeInfo { mode: ModeType::IndirectX, opcode: 0x61}, ModeInfo { mode: ModeType::IndirectY, opcode: 0x71}];

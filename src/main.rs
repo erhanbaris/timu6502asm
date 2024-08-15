@@ -8,6 +8,9 @@ mod context;
 #[cfg(test)]
 mod tests;
 
+use log::{info, LevelFilter};
+use simplelog::*;
+
 use ast::AstGenerator;
 use code_gen::CodeGenerator;
 use context::Context;
@@ -15,13 +18,15 @@ use parser::Parser;
 
 
 fn main() {
+    let _ = CombinedLogger::init(vec![TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)]);
+    info!("timu6502asm Compiler");
+
     let data = br#".byte $ff"#;
 
     let context = Context::new(data);
 
     let mut parser = Parser::new(context);
     parser.parse().unwrap();
-    println!("{:?}", &parser.context.tokens);
     parser.friendly_dump();
 
     let context = parser.context;
@@ -33,5 +38,3 @@ fn main() {
     let context = generator.generate(context).unwrap();
     generator.dump(&context);
 }
-
-

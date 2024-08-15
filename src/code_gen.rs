@@ -2,6 +2,7 @@ use std::{collections::HashMap, str::Utf8Error};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use log::{info, warn};
 use thiserror::Error;
 use strum_macros::EnumDiscriminants;
 
@@ -27,8 +28,18 @@ pub enum CodeGeneratorError {
     IOError(#[from] std::io::Error),
     #[error("Text convertion issue ({0})")]
     Utf8Error(#[from] Utf8Error),
+    
+    #[allow(unused_variables)]
     #[error("Unsupported number format")]
-    UnsupportedNumberFormat
+    UnsupportedNumberFormat,
+    
+    #[allow(unused_variables)]
+    #[error("Word expected")]
+    WordExpected,
+    #[error("Expected {0}")]
+    ExpectedThis(&'static str),
+    #[error("More than expected")]
+    MoreThanExpected
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -36,6 +47,7 @@ pub enum CodeGeneratorError {
 #[strum_discriminants(name(ReferenceType))]
 pub enum ReferenceValue {
     AbsoluteAddress(u16),
+    #[allow(unused_variables)]
     RelativeAddress(u16),
     Value(u16, ModeType),
 }
@@ -178,7 +190,7 @@ impl<'a> CodeGenerator<'a> {
         Ok(())
     }
 
-    fn generate_branch(&mut self, target: &mut Vec<u8>, name: &'a [u8], branch_type: BranchType) -> Result<(), CodeGeneratorError> {
+    fn generate_branch(&mut self, target: &mut Vec<u8>, name: &'a [u8], _: BranchType) -> Result<(), CodeGeneratorError> {
         self.branches.insert(name, target.len());
         self.references.insert(name, ReferenceValue::AbsoluteAddress(0));
         Ok(())
@@ -211,46 +223,130 @@ impl<'a> CodeGenerator<'a> {
         Ok(())
     }
 
-    fn configure_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, value: DirectiveValue<'a>) -> Result<(), CodeGeneratorError> {
+    fn directive_org(&mut self, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("word"));
+        }
+        else if values.len() > 1 {
+            return Err(CodeGeneratorError::MoreThanExpected);
+        }
+
+        self.start_point = values[0].get_word()?;
+        Ok(())
+    }
+
+    fn directive_incbin(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("word"));
+        }
+        else if values.len() > 1 {
+            return Err(CodeGeneratorError::MoreThanExpected);
+        }
+
+        let file_path = match values[0] {
+            DirectiveValue::String(name) => name,
+            _ => return Err(CodeGeneratorError::StringExpected)
+        };
+
+        let file_path = match std::str::from_utf8(file_path) {
+            Ok(file_path) => file_path,
+            Err(error) => return Err(CodeGeneratorError::Utf8Error(error))
+        };
+        
+        let file = match File::open(file_path) {
+            Ok(file) => file,
+            Err(error) => return Err(CodeGeneratorError::IOError(error))
+        };
+
+        let buffer_reader: BufReader<File> = BufReader::new(file);
+        for buffer in buffer_reader.bytes() {
+            match buffer {
+                Ok(byte) => target.push(byte),
+                Err(error) => return Err(CodeGeneratorError::IOError(error))
+            }
+        }
+        Ok(())
+    }
+
+    fn directive_byte(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("byte(s)"));
+        }
+
+        for value in values.iter() {
+            match value {
+                DirectiveValue::Byte(byte) => target.push(*byte),
+                DirectiveValue::String(string) => string.into_iter().for_each(|byte| target.push(*byte)),
+                _ => return Err(CodeGeneratorError::ExpectedThis("byte or string"))
+            };
+        }
+        Ok(())
+    }
+
+    fn directive_word(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("byte(s)"));
+        }
+
+        for value in values.iter() {
+            match value {
+                DirectiveValue::Word(word) => {
+                    target.push(*word as u8);
+                    target.push((*word >> 8) as u8);
+                },
+                _ => return Err(CodeGeneratorError::ExpectedThis("word"))
+            }
+        }
+        Ok(())
+    }
+
+    fn directive_ascii(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>, add_null: bool) -> Result<(), CodeGeneratorError> {
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("string"));
+        }
+        else if values.len() > 1 {
+            return Err(CodeGeneratorError::MoreThanExpected);
+        }
+
+        for value in values.into_iter() {
+            let string = match value {
+                DirectiveValue::String(string) => string,
+                _ => return Err(CodeGeneratorError::ExpectedThis("string"))
+            };
+
+            string.into_iter().for_each(|byte| target.push(*byte));
+
+            if add_null && string[string.len()-1] != 0x0 {
+                target.push(0x0);
+            }
+        }
+        Ok(())
+    }
+
+    fn directive_warning(&mut self, _: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        if values.len() == 0 {
+            return Err(CodeGeneratorError::ExpectedThis("string"));
+        }
+
+        for value in values.into_iter() {
+            match value {
+                DirectiveValue::String(string) => warn!("{}", std::str::from_utf8(&string).map_err(|error| CodeGeneratorError::Utf8Error(error))?),
+                _ => return Err(CodeGeneratorError::ExpectedThis("string"))
+            };
+        }
+        Ok(())
+    }
+
+    fn generate_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
         match option {
-            DirectiveEnum::Org => self.start_point = value.as_u16(),
-            DirectiveEnum::Incbin => {
-
-                let file_path = match value {
-                    DirectiveValue::String(name) => name,
-                    _ => return Err(CodeGeneratorError::StringExpected)
-                };
-
-                let file_path = match std::str::from_utf8(file_path) {
-                    Ok(file_path) => file_path,
-                    Err(error) => return Err(CodeGeneratorError::Utf8Error(error))
-                };
-                
-                let file = match File::open(file_path) {
-                    Ok(file) => file,
-                    Err(error) => return Err(CodeGeneratorError::IOError(error))
-                };
-
-                let buffer_reader: BufReader<File> = BufReader::new(file);
-                for buffer in buffer_reader.bytes() {
-                    match buffer {
-                        Ok(byte) => target.push(byte),
-                        Err(error) => return Err(CodeGeneratorError::IOError(error))
-                    }
-                }
-            },
-            DirectiveEnum::Byte => {
-                match value {
-                    DirectiveValue::String(value) => value.into_iter().for_each(|byte| target.push(*byte)),
-                    DirectiveValue::Number(number, mode) => {
-                        match mode {
-                            ModeType::Relative | ModeType::Absolute => self.push_number(target, number, mode)?,
-                            ModeType::ZeroPage => self.push_number(target, number, mode)?,
-                            _ => return Err(CodeGeneratorError::UnsupportedNumberFormat)
-                        }
-                    }
-                };
-            },
+            DirectiveEnum::Org => self.directive_org(values)?,
+            DirectiveEnum::Incbin => self.directive_incbin(target, values)?,
+            DirectiveEnum::Byte => self.directive_byte(target, values)?,
+            DirectiveEnum::Word => self.directive_word(target, values)?,
+            DirectiveEnum::Ascii => self.directive_ascii(target, values, false)?,
+            DirectiveEnum::Asciiz => self.directive_ascii(target, values, true)?,
+            DirectiveEnum::Warning => self.directive_warning(target, values)?,
         };
         Ok(())
     }
@@ -270,7 +366,7 @@ impl<'a> CodeGenerator<'a> {
                 Some(Ast::Instr(position, number, mode)) => self.generate_instr(&mut context.target, *position, *number, *mode)?,
                 Some(Ast::InstrRef(position, reference)) => self.generate_instr_reference(&mut context.target, *position, *reference)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
-                Some(Ast::Directive(option, value)) => self.configure_directive(&mut context.target, *option, *value)?,
+                Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, &values)?,
                 Some(Ast::Assign(name, number, mode)) => self.configure_assign(*name, *number, *mode)?,
                 None => return Err(CodeGeneratorError::InternalError)
             };
@@ -296,18 +392,20 @@ impl<'a> CodeGenerator<'a> {
     }
 
     pub fn dump(&self, context: &Context<'a>) {
+
+        println!();
+        info!("Binary Output");
         let total_byte_per_row = 8;
         let position = self.start_point;
-        let mut index = 0;
+        let total_bytes = context.target.len();
 
         print!("{:04X}: ", position);
-        for data in context.target.iter() {
+        for (index, data) in context.target.iter().enumerate() {
             print!("{:02X} ", data);
-            index += 1;
             
-            if index % total_byte_per_row == 0 {
+            if index != 0 && index % total_byte_per_row == 0 && index != total_bytes-1 {
                 println!();
-                print!("{:04X}: ", position + index);
+                print!("{:04X}: ", position + (index as u16));
         
             }
         }

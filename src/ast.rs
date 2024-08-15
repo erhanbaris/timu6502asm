@@ -16,7 +16,7 @@ pub enum Ast<'a> {
     Instr(usize, u16, ModeType),
     InstrRef(usize, &'a [u8]),
     Branch(&'a [u8], BranchType),
-    Directive(DirectiveEnum, DirectiveValue<'a>),
+    Directive(DirectiveEnum, Vec<DirectiveValue<'a>>),
     Assign(&'a [u8], u16, ModeType)
 }
 
@@ -87,12 +87,6 @@ impl<'a> AstGenerator<'a> {
         Ok(self.index.get() - 1)
     }
 
-    fn dec(&self) -> Result<(), AstGeneratorError> {
-        self.empty_check()?;
-        self.index.set(self.index.get() - 1);
-        Ok(())
-    }
-
     fn peek(&self)-> Result<usize, AstGeneratorError> {
         self.empty_check()?;
         Ok(self.index.get())
@@ -123,7 +117,7 @@ impl<'a> AstGenerator<'a> {
         };
 
         let token = &context.tokens.borrow()[token_index];
-        let token_type: TokenType = TokenType::from(token.token);
+        let token_type: TokenType = TokenType::from(&token.token);
         
         match token_type == expected {
             true => {
@@ -193,32 +187,66 @@ impl<'a> AstGenerator<'a> {
         if let Some(position) = OPTIONS.iter().position(|item| *item == &option[..]) {
             let modes = OPTION_MODES[position];
             let directive_type = DIRECTIVE_ENUMS[position];
-            let mut found = false;
+            let tokens = context.tokens.borrow();
+
+            let mut token_found = false;
+            let mut finish = false;
 
             self.cleanup_space(context)?;
+            let mut values = Vec::new();
 
-            for mode in modes.iter() {
-                match mode {
-                    DirectiveType::Number => {
-                        if let Some((number, mode)) = self.eat_if_number(context) {
-                            context.add_ast(token_index, Ast::Directive(directive_type, DirectiveValue::Number(number, mode)));
-                            found = true;
-                            break;
-                        }
-                    },
-                    DirectiveType::String => {
-                        if let Some(string) = self.eat_if_string(context) {
-                            context.add_ast(token_index,Ast::Directive(directive_type, DirectiveValue::String(string)));
-                            found = true;
-                            break;
-                        }
-                    },
-                }                
+            while self.size.get() > self.index.get() {
+                let value_index = self.eat()?;
+                let value_token = &tokens.get(value_index).map(|item| &item.token);
+
+                if token_found {
+                    /* comma, space, new line, end or comment expected */
+                    match value_token {
+                        Some(Token::NewLine(_)) => finish = true,
+                        Some(Token::Comment(_)) => finish = true,
+                        Some(Token::End) => finish = true,
+                        Some(Token::Space(_)) => (),
+                        Some(Token::Comma) => token_found = false,
+                        _ => return Err(AstGeneratorError::syntax_issue(context, value_index, "Unexpected syntax"))
+                    }
+                }
+                else {
+                    /* Expected parseable token */
+                    match value_token {
+                        Some(Token::Keyword(keyword)) => { values.push(DirectiveValue::Reference(*keyword)); token_found = true; },
+                        Some(Token::Number(number, ModeType::Absolute)) => { values.push(DirectiveValue::Word(*number)); token_found = true; },
+                        Some(Token::Number(number, ModeType::ZeroPage)) => { values.push(DirectiveValue::Byte((*number) as u8)); token_found = true; },
+                        Some(Token::Number(number, ModeType::Relative)) => { values.push(DirectiveValue::Byte((*number) as u8)); token_found = true; },
+                        Some(Token::String(string)) => { values.push(DirectiveValue::String(*string)); token_found = true; },
+                        Some(Token::BranchNext(name)) => { values.push(DirectiveValue::Reference(*name)); token_found = true; },
+                        Some(Token::NewLine(_)) => finish = true,
+                        Some(Token::Comment(_)) => finish = true,
+                        Some(Token::End) => finish = true,
+                        Some(Token::Space(_)) => (),
+                        Some(Token::Comma) => return Err(AstGeneratorError::syntax_issue(&context, value_index, "',' not expected")),
+                        Some(_) => return Err(AstGeneratorError::syntax_issue(context, value_index, "Unexpected syntax")),
+                        None => return Err(AstGeneratorError::InternalError)
+                    };
+                }
+
+                if token_found {
+                    /* Is it expected token? */
+                    let last_token_type = DirectiveType::from(&values[values.len()-1]);
+                    if !modes.iter().any(|mode| *mode == last_token_type) {
+                        return Err(AstGeneratorError::syntax_issue(context, value_index, "Unexpected syntax"))
+                    }
+                }
+
+                if finish {
+                    break;
+                }
             }
 
-            if !found {
+            if modes.len() > 0 && values.len() == 0 {
                 return Err(AstGeneratorError::syntax_issue(context, token_index, "Missing information"))
             }
+
+            context.add_ast(token_index,Ast::Directive(directive_type, values));
         } else {
             return Err(AstGeneratorError::syntax_issue(context, token_index, "Unsupported compiler configuration"))
         }
@@ -290,7 +318,7 @@ impl<'a> AstGenerator<'a> {
         while self.size.get() > self.index.get() {
             let token_index = self.eat()?;
 
-            match &context.tokens.borrow().get(token_index).map(|item| item.token) {
+            match &context.tokens.borrow().get(token_index).map(|item| &item.token) {
                 Some(Token::Instr(positon)) => self.generate_code_block(&context, token_index, *positon)?,
                 Some(Token::Keyword(keyword)) => self.generate_assign(&context, token_index, keyword)?,
                 Some(Token::Directive(option)) => self.generate_directive(&context, token_index, option)?,
@@ -300,6 +328,7 @@ impl<'a> AstGenerator<'a> {
                 Some(Token::NewLine(_)) => (),
                 Some(Token::Space(_)) => (),
                 Some(Token::Assign) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'=' not expected")),
+                Some(Token::Comma) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "',' not expected")),
                 Some(Token::String(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "String not expected")),
                 Some(Token::BranchNext(name)) => self.generate_branch(&context, token_index, name, BranchType::Next)?,
                 Some(Token::End) => break,
@@ -316,6 +345,7 @@ impl<'a> AstGenerator<'a> {
             Err(error) => {
                 let tokens = context.tokens.borrow();
                 let token = &tokens[self.index.get() - 1];
+                println!("1{:?}", context.source);
                 print_error(&context.source, &error, token.line, token.column, token.end);
                 Err(error)
             }

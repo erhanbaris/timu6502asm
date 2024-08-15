@@ -33,10 +33,82 @@ Expected output:
 0610: fb 60 00
 ```
 
+## Available directives
+
+### .org
+Change reference locations. It is not changing where the codes are stored, it is changing jump and branch references.
+```assembly
+.ORG $0600
+.byte $11
+```
+```
+0600: 11
+```
+
+### .byte
+Define byte sized data. Must be followed by a sequence of (byte ranged) expressions or strings.
+
+```assembly
+.byte $11
+.byte $22, $33
+.byte "Hello"
+```
+```
+0000: 11 22 33 48 65 6C 6C 6F
+```
+
+### .word
+Write 1 or many word information into memory
+```assembly
+.byte $1122
+.byte $3344, $5566
+```
+```
+0000: 22 11 44 33 66 55
+```
+
+### .ascii
+Write ascii information into memory. Also, byte directive can be used.
+```assembly
+.ascii "hello world"
+```
+```
+0000: 68 65 6C 6C 6F 20 77 6F
+0008: 72 6C 64
+```
+
+### .asciiz
+Write ascii information into memory. If there is no 0x00 at end of the string, compiler will add 0x00.
+```assembly
+.asciiz "hello world"
+```
+```
+0000: 68 65 6C 6C 6F 20 77 6F
+0008: 72 6C 64 00
+```
+
+### .incbin
+Include a file as binary data.
+```assembly
+.incbin "src/tests/bins/test1.bin"
+```
+```
+0000: 00 01 02 03
+```
+
+### .warning
+Print warning message on compilation time.
+```assembly
+.warning "timu6502asm compiler works partial"
+```
+```
+22:05:16 [WARN] timu6502asm compiler works partial
+```
+
 There are many things to do. Here are the some todos:
  - [ ] Case insensitivity
  - [ ] Rom file generation
- - [ ] Decompile binaries
+ - [ ] Decompiler
  - [ ] Human friendly prints
  - [ ] Import different asm files
  - [ ] Performance measurement

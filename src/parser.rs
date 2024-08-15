@@ -1,4 +1,5 @@
 use crate::{context::Context, opcode::{ModeType, INSTS}, tool::{print_error, upper_case_byte}};
+use log::info;
 use strum_macros::EnumDiscriminants;
 
 /*
@@ -29,7 +30,7 @@ pub struct Parser<'a> {
     pub context: Context<'a>
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 #[derive(EnumDiscriminants)]
 #[strum_discriminants(name(TokenType))]
 pub enum Token<'a> {
@@ -39,6 +40,7 @@ pub enum Token<'a> {
     Directive(&'a [u8]),
     Comment(&'a [u8]),
     Assign,
+    Comma,
     Branch(&'a [u8]),
     BranchNext(&'a [u8]),
     Number(u16, ModeType),
@@ -117,6 +119,7 @@ impl<'a> Parser<'a> {
         match self.inner_parse() {
             Ok(_) => Ok(()),
             Err(error) => {
+                println!("2{:?}", self.context.source);
                 print_error(&self.context.source, &error, self.line, self.column, self.end);
                 Err(error)
             }
@@ -204,6 +207,7 @@ impl<'a> Parser<'a> {
             b'"' => self.parse_string(),
             b';' => self.parse_comment(),
             b'=' => self.parse_assign(),
+            b',' => self.parse_comma(),
             b'\r' | b'\n' => self.parse_newline(),
             b' ' | b'\t' => self.parse_whitespace(),
             n => {
@@ -216,6 +220,8 @@ impl<'a> Parser<'a> {
     fn parse_absolute_mode(&mut self, number: u16, is_absolute: bool) -> Result<Token<'a>, ParseError> {
         self.eat_spaces()?;
 
+        let current_index = self.index;
+        
         if self.peek() == Ok(b',') {
             self.eat()?; // Eat ,
             self.eat_spaces()?;
@@ -229,7 +235,13 @@ impl<'a> Parser<'a> {
                     true => ModeType::AbsoluteY,
                     false => ModeType::ZeroPageY
                 })),
-                _ => Err(ParseError::InvalidNumberFormat),
+                _ => {
+                    self.index = current_index; // Restore index
+                    Ok(Token::Number(number, match is_absolute {
+                        true => ModeType::Absolute,
+                        false => ModeType::ZeroPage
+                    }))
+                },
             }
         } else {
             Ok(Token::Number(number, match is_absolute {
@@ -530,6 +542,11 @@ impl<'a> Parser<'a> {
         Ok(Token::Assign)
     }
 
+    fn parse_comma(&mut self) -> Result<Token<'a>, ParseError> {
+        self.eat_expected(b',', ParseError::UnexpectedSymbol)?;
+        Ok(Token::Comma)
+    }
+
     fn parse_newline(&mut self) -> Result<Token<'a>, ParseError> {
         let mut total_lines = 0;
 
@@ -558,12 +575,13 @@ impl<'a> Parser<'a> {
     pub fn friendly_dump(&self) {
         let mut line = 0;
 
+        info!("Tokens");
         print!("{:>5}. ", line);
         for ast in self.context.tokens.borrow().iter() {
             let type_name = match ast.token {
                 Token::Instr(_) => "INSTR",
                 Token::Keyword(_) => "KEYWORD",
-                Token::Directive(_) => "OPTION",
+                Token::Directive(_) => "DIRECTIVE",
                 Token::Comment(_) => "COMMENT",
                 Token::Branch(_) => "BRANCH",
                 Token::Number(_, _) => "NUMBER",
@@ -573,6 +591,7 @@ impl<'a> Parser<'a> {
                 Token::String(_) => "STRING",
                 Token::BranchNext(_) => "BRANCHNEXT",
                 Token::Assign => "ASSIGN",
+                Token::Comma => "COMMA",
             };
 
             if ast.line != line {

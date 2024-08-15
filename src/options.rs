@@ -1,35 +1,54 @@
 use strum_macros::EnumDiscriminants;
 
-use crate::opcode::ModeType;
+use crate::code_gen::CodeGeneratorError;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DirectiveEnum {
     Org,
     Incbin,
-    Byte
+    Byte,
+    Word,
+    Ascii,
+    Asciiz,
+    Warning
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 #[derive(EnumDiscriminants)]
 #[strum_discriminants(name(DirectiveType))]
 pub enum DirectiveValue<'a> {
-    Number(u16, ModeType),
-    String(&'a [u8])
+    Byte(u8),
+    Word(u16),
+    String(&'a [u8]),
+    Reference(&'a [u8]),
 }
 
 impl<'a> DirectiveValue<'a> {
-    pub fn as_u16(&self) -> u16 {
+    pub fn get_word(&self) -> Result<u16, CodeGeneratorError> {
+        
         match self {
-            DirectiveValue::Number(number, _) => *number,
-            DirectiveValue::String(_) => 0
+            DirectiveValue::Word(number) => Ok(*number),
+            _ => Err(CodeGeneratorError::ExpectedThis("Word information"))
+        }
+    }
+
+    pub fn get_byte(&self) -> Result<u8, CodeGeneratorError> {
+        
+        match self {
+            DirectiveValue::Byte(number) => Ok(*number),
+            _ => Err(CodeGeneratorError::ExpectedThis("Byte information"))
         }
     }
 }
 
-pub const OPTIONS: [&[u8]; 3] = [b"ORG", b"INCBIN", b"BYTE"];
-pub const ORG_TYPES: [DirectiveType; 1] = [DirectiveType::Number];
+pub const OPTIONS: [&[u8]; 7] = [b"ORG", b"INCBIN", b"BYTE", b"WORD", b"ASCII", b"ASCIIZ", b"WARNING"];
+pub const ORG_TYPES: [DirectiveType; 1] = [DirectiveType::Word];
 pub const INCBIN_TYPES: [DirectiveType; 1] = [DirectiveType::String];
-pub const BYTE_TYPES: [DirectiveType; 2] = [DirectiveType::String, DirectiveType::Number];
+pub const BYTE_TYPES: [DirectiveType; 2] = [DirectiveType::Byte, DirectiveType::String];
+pub const WORD_TYPES: [DirectiveType; 1] = [DirectiveType::Word];
+pub const ASCII_TYPES: [DirectiveType; 1] = [DirectiveType::String];
+pub const ASCIIZ_TYPES: [DirectiveType; 1] = [DirectiveType::String];
+pub const WARNING_TYPES: [DirectiveType; 1] = [DirectiveType::String];
 
-pub const OPTION_MODES: [&[DirectiveType]; 3] = [&ORG_TYPES, &INCBIN_TYPES, &BYTE_TYPES];
-pub const DIRECTIVE_ENUMS: [DirectiveEnum; 3] = [DirectiveEnum::Org, DirectiveEnum::Incbin, DirectiveEnum::Byte];
+pub const OPTION_MODES: [&[DirectiveType]; 7] = [&ORG_TYPES, &INCBIN_TYPES, &BYTE_TYPES, &WORD_TYPES, &ASCII_TYPES, &ASCIIZ_TYPES, &WARNING_TYPES];
+pub const DIRECTIVE_ENUMS: [DirectiveEnum; 7] = [DirectiveEnum::Org, DirectiveEnum::Incbin, DirectiveEnum::Byte, DirectiveEnum::Word, DirectiveEnum::Ascii, DirectiveEnum::Asciiz, DirectiveEnum::Warning];

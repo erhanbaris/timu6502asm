@@ -1,6 +1,8 @@
 use core::str;
 use std::fmt::Debug;
 
+use log::error;
+
 pub fn upper_case(bytes: &[u8]) -> Vec<u8> {
     bytes
         .into_iter()
@@ -23,8 +25,9 @@ pub fn print_error<T: Debug>(data: &'_ [u8], error: &T, line: usize, column: usi
             line_index += 1;
 
             if line_index == line {
-                start_index = index;
+                start_index = index+1;
                 line_found = true;
+                continue;
             }
 
             if line_found {
@@ -35,9 +38,9 @@ pub fn print_error<T: Debug>(data: &'_ [u8], error: &T, line: usize, column: usi
     }
 
     println!("");
-    println!("Error: {:?}", &error);
-    println!("Line: {}, column: {}", line + 1, column);
-    println!("{}", str::from_utf8(&data[start_index..end_index]).unwrap());
-    println!("{}{}", (0..column).map(|_| " ").collect::<String>(), (0..end-column).map(|_| "^").collect::<String>());
+    error!("{:?}", &error);
+    error!("Line: {}, column: {}", line + 1, column);
+    error!("{}", str::from_utf8(&data[start_index..end_index]).unwrap());
+    error!("{}{}", (0..column).map(|_| " ").collect::<String>(), (0..end-column).map(|_| "^").collect::<String>());
     println!("");
 }

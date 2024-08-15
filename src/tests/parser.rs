@@ -74,8 +74,6 @@ fn number_check(#[case] data: &'_ [u8], #[case] token: Token<'_>) {
 #[case(b"$a01", 3)]
 #[case(b"$a0111", 3)]
 #[case(b"$a", 0)]
-#[case(b"$a0,b", 0)]
-#[case(b"$a0,", 0)]
 #[case(b"$ta000", 0)]
 #[case(b"$a000-,X", 0)]
 #[case(b"($a0,X", 0)]
