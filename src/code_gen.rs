@@ -4,11 +4,10 @@ use std::io::BufReader;
 use std::io::Read;
 use log::{info, warn};
 use thiserror::Error;
-use strum_macros::EnumDiscriminants;
 
 use crate::context::Context;
 use crate::tool::print_error;
-use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, options::{DirectiveEnum, DirectiveValue}};
+use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, directive::{DirectiveEnum, DirectiveValue}};
 
 #[derive(Error, Debug)]
 pub enum CodeGeneratorError {
@@ -27,29 +26,9 @@ pub enum CodeGeneratorError {
     #[error("IO Error ({0})")]
     IOError(#[from] std::io::Error),
     #[error("Text convertion issue ({0})")]
-    Utf8Error(#[from] Utf8Error),
-    
-    #[allow(unused_variables)]
-    #[error("Unsupported number format")]
-    UnsupportedNumberFormat,
-    
-    #[allow(unused_variables)]
-    #[error("Word expected")]
-    WordExpected,
+    Utf8Error(#[from] Utf8Error),    
     #[error("Expected {0}")]
-    ExpectedThis(&'static str),
-    #[error("More than expected")]
-    MoreThanExpected
-}
-
-#[derive(Debug, PartialEq, Copy, Clone)]
-#[derive(EnumDiscriminants)]
-#[strum_discriminants(name(ReferenceType))]
-pub enum ReferenceValue {
-    AbsoluteAddress(u16),
-    #[allow(unused_variables)]
-    RelativeAddress(u16),
-    Value(u16, ModeType),
+    ExpectedThis(&'static str)
 }
 
 #[derive(Debug)]
@@ -59,7 +38,7 @@ pub struct CodeGenerator<'a> {
 
     pub start_point: u16,
     pub branches: HashMap<&'a [u8], usize>,
-    pub references: HashMap<&'a [u8], ReferenceValue>,
+    pub references: HashMap<&'a [u8], Vec<DirectiveValue<'a>>>,
     pub unresolved_branches: Vec<(&'a [u8], usize, usize)>,
     pub unresolved_jumps: Vec<(&'a [u8], usize, usize)>
 }
@@ -124,7 +103,7 @@ impl<'a> CodeGenerator<'a> {
             None=> return Err(CodeGeneratorError::UnresolvedReference)
         };
 
-        let (number, mode) = match value {
+        /*let (number, mode) = match value {
             ReferenceValue::AbsoluteAddress(_) => return Err(CodeGeneratorError::InvalidReferenceValue),
             ReferenceValue::RelativeAddress(_) => return Err(CodeGeneratorError::InvalidReferenceValue),
             ReferenceValue::Value(number, mode) => (*number, *mode),
@@ -135,7 +114,7 @@ impl<'a> CodeGenerator<'a> {
                 target.push(search_mode.opcode);
                 self.push_number(target, number, mode)?;
             }
-        }
+        }*/
         
         Ok(())
     }
@@ -174,8 +153,8 @@ impl<'a> CodeGenerator<'a> {
         Ok(())
     }
 
-    fn configure_assign(&mut self, name: &'a [u8], number: u16, mode: ModeType) -> Result<(), CodeGeneratorError> {
-        self.references.insert(name, ReferenceValue::Value(number, mode));
+    fn configure_assign(&mut self, name: &'a [u8], values: Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
+        self.references.insert(name, values);
         Ok(())
     }
 
@@ -192,7 +171,7 @@ impl<'a> CodeGenerator<'a> {
 
     fn generate_branch(&mut self, target: &mut Vec<u8>, name: &'a [u8], _: BranchType) -> Result<(), CodeGeneratorError> {
         self.branches.insert(name, target.len());
-        self.references.insert(name, ReferenceValue::AbsoluteAddress(0));
+        //self.references.insert(name, ReferenceValue::AbsoluteAddress(0));
         Ok(())
     }
 
@@ -224,26 +203,11 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn directive_org(&mut self, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("word"));
-        }
-        else if values.len() > 1 {
-            return Err(CodeGeneratorError::MoreThanExpected);
-        }
-
         self.start_point = values[0].get_word()?;
         Ok(())
     }
 
     fn directive_incbin(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("word"));
-        }
-        else if values.len() > 1 {
-            return Err(CodeGeneratorError::MoreThanExpected);
-        }
-
         let file_path = match values[0] {
             DirectiveValue::String(name) => name,
             _ => return Err(CodeGeneratorError::StringExpected)
@@ -270,10 +234,6 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn directive_byte(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("byte(s)"));
-        }
-
         for value in values.iter() {
             match value {
                 DirectiveValue::Byte(byte) => target.push(*byte),
@@ -285,10 +245,6 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn directive_word(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("byte(s)"));
-        }
-
         for value in values.iter() {
             match value {
                 DirectiveValue::Word(word) => {
@@ -302,13 +258,6 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn directive_ascii(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>, add_null: bool) -> Result<(), CodeGeneratorError> {
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("string"));
-        }
-        else if values.len() > 1 {
-            return Err(CodeGeneratorError::MoreThanExpected);
-        }
-
         for value in values.into_iter() {
             let string = match value {
                 DirectiveValue::String(string) => string,
@@ -325,10 +274,6 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn directive_warning(&mut self, _: &mut Vec<u8>, values: &Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        if values.len() == 0 {
-            return Err(CodeGeneratorError::ExpectedThis("string"));
-        }
-
         for value in values.into_iter() {
             match value {
                 DirectiveValue::String(string) => warn!("{}", std::str::from_utf8(&string).map_err(|error| CodeGeneratorError::Utf8Error(error))?),
@@ -367,7 +312,7 @@ impl<'a> CodeGenerator<'a> {
                 Some(Ast::InstrRef(position, reference)) => self.generate_instr_reference(&mut context.target, *position, *reference)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
                 Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, &values)?,
-                Some(Ast::Assign(name, number, mode)) => self.configure_assign(*name, *number, *mode)?,
+                Some(Ast::Assign(name, values)) => self.configure_assign(*name, values.clone())?,
                 None => return Err(CodeGeneratorError::InternalError)
             };
         }
@@ -403,9 +348,9 @@ impl<'a> CodeGenerator<'a> {
         for (index, data) in context.target.iter().enumerate() {
             print!("{:02X} ", data);
             
-            if index != 0 && index % total_byte_per_row == 0 && index != total_bytes-1 {
+            if index > 1 && (index+1) % total_byte_per_row == 0 && index != total_bytes-1 {
                 println!();
-                print!("{:04X}: ", position + (index as u16));
+                print!("{:04X}: ", position + 1 + (index as u16));
         
             }
         }
