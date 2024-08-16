@@ -1,5 +1,7 @@
 use std::{cell::Cell, fs::File, io::Read, marker::PhantomData};
 
+use thiserror::Error;
+
 use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenInfo, TokenType}, tool::{print_error, upper_case}};
 
 #[derive(Debug, Copy, Clone)]
@@ -9,25 +11,25 @@ pub enum BranchType {
 }
 
 #[derive(Debug)]
-pub enum Ast<'a> {
+pub enum Ast {
     InstrImplied(usize),
-    InstrBranch(usize, &'a [u8]),
-    InstrJump(usize, &'a [u8]),
+    InstrBranch(usize, String),
+    InstrJump(usize, String),
     Instr(usize, u16, ModeType),
-    Branch(&'a [u8], BranchType),
-    Directive(DirectiveEnum, Vec<DirectiveValue<'a>>)
+    Branch(String, BranchType),
+    Directive(DirectiveEnum, Vec<DirectiveValue>)
 }
 
 #[derive(Debug)]
-pub struct AstInfo<'a> {
+pub struct AstInfo {
     pub line: usize,
     pub column: usize,
-    pub ast: Ast<'a>,
+    pub ast: Ast,
     pub end: usize,
 }
 
-impl<'a> AstInfo<'a> {
-    pub fn new(token: &'a TokenInfo<'a>, ast: Ast<'a>) -> Self {
+impl AstInfo {
+    pub fn new(token: &TokenInfo, ast: Ast) -> Self {
         Self {
             line: token.line,
             column: token.column,
@@ -37,39 +39,44 @@ impl<'a> AstInfo<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AstGeneratorError {
+    #[error("Syntax issue")]
     SyntaxIssue {
         #[allow(dead_code)] line: usize,
         #[allow(dead_code)] column: usize,
         #[allow(dead_code)] end: usize,
         #[allow(dead_code)] message: String
     },
+    
+    #[error("Out of scope")]
     OutOfScope,
+    
+    #[error("Internal error")]
     InternalError,
-    FileNotValid
+
+    #[error("IO Error ({0})")]
+    IOError(#[from] std::io::Error),
 }
 
 impl AstGeneratorError {
-    pub fn syntax_issue<'a>(context: &Context<'a>, token_index: usize, message: String) -> Self {
+    pub fn syntax_issue(context: &Context, token_index: usize, message: String) -> Self {
         let token_info = &context.tokens.borrow()[token_index];
         AstGeneratorError::SyntaxIssue { column: token_info.column, end: token_info.end, line: token_info.line, message  }
     }
 }
 
 #[derive(Debug)]
-pub struct AstGenerator<'a> {
+pub struct AstGenerator {
     pub index: Cell<usize>,
     pub size: Cell<usize>,
-    marker: PhantomData<&'a u8>
 }
 
-impl<'a> AstGenerator<'a> {
+impl AstGenerator {
     pub fn new() -> Self {
         Self {
             index: Cell::new(0),
             size: Cell::new(0),
-            marker: Default::default()
         }
     }
     
@@ -91,7 +98,7 @@ impl<'a> AstGenerator<'a> {
         Ok(self.index.get())
     }
     
-    fn eat_expected(&self, context: &Context<'a>, token_type: TokenType, error: AstGeneratorError) -> Result<(), AstGeneratorError> {
+    fn eat_expected(&self, context: &Context, token_type: TokenType, error: AstGeneratorError) -> Result<(), AstGeneratorError> {
         let token_index = self.eat()?;
         let token = &context.tokens.borrow()[token_index];
 
@@ -101,7 +108,7 @@ impl<'a> AstGenerator<'a> {
         Ok(())
     }
 
-    fn eat_space(&self, context: &Context<'a>) -> Result<(), AstGeneratorError> {
+    fn eat_space(&self, context: &Context) -> Result<(), AstGeneratorError> {
         let token_index= self.eat()?;
         let token = &context.tokens.borrow()[token_index];
         match token.token {
@@ -110,7 +117,7 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
-    fn cleanup_space(&self, context: &Context<'a>) -> Result<(), AstGeneratorError> {
+    fn cleanup_space(&self, context: &Context) -> Result<(), AstGeneratorError> {
         let token_index = self.peek()?;
         let token = &context.tokens.borrow()[token_index];
         if let Token::Space(_) = token.token {
@@ -119,7 +126,7 @@ impl<'a> AstGenerator<'a> {
         Ok(())
     }
 
-    fn eat_if(&self, context: &Context<'a>, expected: TokenType) -> Option<usize> {
+    fn eat_if(&self, context: &Context, expected: TokenType) -> Option<usize> {
         let token_index = match self.peek() {
             Ok(token_index) => token_index,
             Err(_) => return None
@@ -137,16 +144,16 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
-    fn eat_if_string(&self, context: &Context<'a>) -> Option<&'a [u8]> {
+    fn eat_if_string(&self, context: &Context) -> Option<String> {
         let index = self.eat_if(context, TokenType::String)?;
         let token = &context.tokens.borrow()[index];
-        match token.token {
-            Token::String(string) => Some(string),
+        match &token.token {
+            Token::String(string) => Some(string.clone()),
             _ => None
         }
     }
     
-    fn eat_if_number(&self, context: &Context<'a>) -> Option<(u16, ModeType)> {
+    fn eat_if_number(&self, context: &Context) -> Option<(u16, ModeType)> {
 
         if let Ok(mut position) = self.peek() {
             let tokens = context.tokens.borrow();
@@ -186,10 +193,10 @@ impl<'a> AstGenerator<'a> {
                     return None
                 }
 
-                let first_value = values[0];
+                let first_value = &values[0];
                 (number, mode) = match first_value {
-                    DirectiveValue::Byte(number) => (number as u16, ModeType::ZeroPage),
-                    DirectiveValue::Word(number) => (number as u16, ModeType::Absolute),
+                    DirectiveValue::Byte(number) => (*number as u16, ModeType::ZeroPage),
+                    DirectiveValue::Word(number) => (*number as u16, ModeType::Absolute),
                     _ => {
                         self.index.set(index);
                         return None
@@ -210,7 +217,7 @@ impl<'a> AstGenerator<'a> {
         None
     }
 
-    fn eat_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
+    fn eat_number(&self, context: &Context) -> Result<(u16, ModeType), AstGeneratorError> {
         let token_index= self.eat()?;
         let token = &context.tokens.borrow()[token_index];
         match token.token {
@@ -220,16 +227,16 @@ impl<'a> AstGenerator<'a> {
         }
     }
     
-    fn eat_string(&self, context: &Context<'a>) -> Result<&'a [u8], AstGeneratorError> {
+    fn eat_string(&self, context: &Context) -> Result<String, AstGeneratorError> {
         let token_index= self.eat()?;
         let token = &context.tokens.borrow()[token_index];
-        match token.token {
-            Token::String(string) => Ok(string),
+        match &token.token {
+            Token::String(string) => Ok(string.clone()),
             _ => Err(AstGeneratorError::syntax_issue(context, token_index, "Expected string".to_string()))
         }
     }
     
-    fn eat_assign(&self, context: &Context<'a>) -> Result<(), AstGeneratorError> {
+    fn eat_assign(&self, context: &Context) -> Result<(), AstGeneratorError> {
         let token_index= self.eat()?;
         let token = &context.tokens.borrow()[token_index];
         match token.token {
@@ -238,16 +245,16 @@ impl<'a> AstGenerator<'a> {
         }
     }
 
-    fn eat_text(&self, context: &Context<'a>) -> Result<&'a [u8], AstGeneratorError> {
+    fn eat_text(&self, context: &Context) -> Result<String, AstGeneratorError> {
         let token_index= self.eat()?;
         let token = &context.tokens.borrow()[token_index];
-        match token.token {
-            Token::Keyword(text) => Ok(text),
+        match &token.token {
+            Token::Keyword(text) => Ok(text.clone()),
             _ => Err(AstGeneratorError::syntax_issue(context, token_index, "Expected text".to_string()))
         }
     }
 
-    fn parse_list(&'a self, context: &Context<'a>, validator: impl Fn(DirectiveType) -> bool) -> Result<Vec<DirectiveValue>, AstGeneratorError>  {
+    fn parse_list(&self, context: &Context, validator: impl Fn(DirectiveType) -> bool) -> Result<Vec<DirectiveValue>, AstGeneratorError>  {
         let tokens = context.tokens.borrow();
 
         let mut token_found = false;
@@ -274,11 +281,11 @@ impl<'a> AstGenerator<'a> {
             else {
                 /* Expected parseable token */
                 match value_token {
-                    Some(Token::Keyword(keyword)) => { values.push(DirectiveValue::Reference(*keyword)); token_found = true; },
+                    Some(Token::Keyword(keyword)) => { values.push(DirectiveValue::Reference(keyword.clone())); token_found = true; },
                     Some(Token::Word(number)) => { values.push(DirectiveValue::Word(*number)); token_found = true; },
                     Some(Token::Byte(number)) => { values.push(DirectiveValue::Byte((*number) as u8)); token_found = true; },
-                    Some(Token::String(string)) => { values.push(DirectiveValue::String(*string)); token_found = true; },
-                    Some(Token::BranchNext(name)) => { values.push(DirectiveValue::Reference(*name)); token_found = true; },
+                    Some(Token::String(string)) => { values.push(DirectiveValue::String(string.clone())); token_found = true; },
+                    Some(Token::BranchNext(name)) => { values.push(DirectiveValue::Reference(name.clone())); token_found = true; },
                     Some(Token::NewLine(_)) => finish = true,
                     Some(Token::Comment(_)) => finish = true,
                     Some(Token::End) => finish = true,
@@ -303,8 +310,8 @@ impl<'a> AstGenerator<'a> {
         Ok(values)
     }
 
-    fn generate_directive(&'a self, context: &Context<'a>, token_index: usize, directive_name: &'a [u8]) -> Result<(), AstGeneratorError> {
-        let directive_name = upper_case(directive_name);
+    fn generate_directive(&self, context: &Context, token_index: usize, directive_name: &String) -> Result<(), AstGeneratorError> {
+        let directive_name = directive_name.to_uppercase();
         if let Some(directive) = SYSTEM_DIRECTIVES.iter().find(|item| item.name == &directive_name[..]) {
 
             let values = self.parse_list(context, |directive_type| -> bool {
@@ -333,10 +340,6 @@ impl<'a> AstGenerator<'a> {
                 return Err(AstGeneratorError::syntax_issue(context, token_index, "Missing information".to_string()))
             }
 
-            if DirectiveEnum::Include == directive.directive {
-                self.process_include(context, token_index, &values[0])?;
-            }
-
             context.add_ast(token_index, Ast::Directive(directive.directive, values));
 
         } else {
@@ -345,59 +348,58 @@ impl<'a> AstGenerator<'a> {
         Ok(())
     }
 
-    fn process_include(&self, context: &Context<'a>, token_index: usize, value: &DirectiveValue<'a>) -> Result<(), AstGeneratorError> {
+    fn process_include(&self, context: &Context, token_index: usize, value: &DirectiveValue) -> Result<(), AstGeneratorError> {
         let file_path = match value {
             DirectiveValue::String(name) => name,
             _ => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Path expected as a string".to_string()))
         };
 
-        let file_path = match std::str::from_utf8(file_path) {
-            Ok(file_path) => file_path,
-            _ => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Invalid text format".to_string()))
-        };
+        println!("File: {}", &file_path);
+        let mut file = File::open(&file_path)?;
 
-        let mut file = match File::open(file_path) {
-            Ok(file) => file,
-            Err(_) => return Err(AstGeneratorError::FileNotValid)
-        };
 
         let mut code = Vec::new();
-        match file.read_to_end(&mut code) {
-            Ok(_) => (),
-            Err(_) => return Err(AstGeneratorError::FileNotValid)
-        };
+        file.read_to_end(&mut code)?;
 
-        let new_context = Context::new(&code);
+        let new_context = Context::default();
+        context.add_file(file_path.to_string());
 
-        let mut parser = Parser::new(new_context);
+        let mut parser = Parser::new(context.last_file_id(), &code[..], new_context);
         parser.parse().unwrap();
 
+        let new_context = parser.context;
+
         let mut tokens = context.tokens.borrow_mut();
+        let new_tokens = new_context.tokens.borrow();
         let current_position = self.index.get();
 
-        for token in new_context.tokens.borrow().iter().rev() {
-            tokens.insert(current_position, token.clone());
+        if new_tokens.len() > 0 {
+            for token in new_tokens.iter().take(new_tokens.len()-1).rev() {
+                tokens.insert(current_position, token.clone());
+            }
+
+            self.size.set(tokens.len());
         }
 
         Ok(())
     }
 
-    fn generate_branch(&self, context: &Context<'a>, token_index: usize, name: &'a [u8], branch_type: BranchType) -> Result<(), AstGeneratorError> {
-        context.add_ast(token_index,Ast::Branch(name, branch_type));
+    fn generate_branch(&self, context: &Context, token_index: usize, name: &String, branch_type: BranchType) -> Result<(), AstGeneratorError> {
+        context.add_ast(token_index, Ast::Branch(name.clone(), branch_type));
         Ok(())
     }
 
-    fn generate_assign(&'a self, context: &Context<'a>, token_index: usize, name: &'a [u8]) -> Result<(), AstGeneratorError> {
+    fn generate_assign(&self, context: &Context, token_index: usize, name: &String) -> Result<(), AstGeneratorError> {
         self.cleanup_space(context)?;
         self.eat_assign(context)?;
         self.cleanup_space(context)?;
 
         let values = self.parse_list(context, |_| true)?;
-        context.references.borrow_mut().insert(name, values);
+        context.references.borrow_mut().insert(name.clone(), values);
         Ok(())
     }
 
-    pub(crate) fn try_parse_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
+    pub(crate) fn try_parse_number(&self, context: &Context) -> Result<(u16, ModeType), AstGeneratorError> {
         self.cleanup_space(context)?;
         let tokens = context.tokens.borrow();
         let token_index = self.peek()?;
@@ -433,8 +435,8 @@ impl<'a> AstGenerator<'a> {
                 let token = &tokens[token_index];
 
                 mode = match &token.token {
-                    Token::Keyword(&[b'x']) |Token::Keyword(&[b'X']) => ModeType::IndirectX,
-                    Token::Keyword(&[b'y']) |Token::Keyword(&[b'Y']) => ModeType::IndirectY,
+                    Token::Keyword(value) if value == "x" || value == "X" => ModeType::IndirectX,
+                    Token::Keyword(value) if value == "y" || value == "Y" => ModeType::IndirectY,
                     _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X or Y".to_string()))
                 };
 
@@ -472,12 +474,12 @@ impl<'a> AstGenerator<'a> {
                 let token = &tokens[token_index];
 
                 mode = match &token.token {
-                    Token::Keyword(&[b'x']) |Token::Keyword(&[b'X']) => match mode {
+                    Token::Keyword(value) if value == "x" || value == "X" => match mode {
                         ModeType::Absolute => ModeType::AbsoluteX,
                         ModeType::ZeroPage => ModeType::ZeroPageX,
                         _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
                     },
-                    Token::Keyword(&[b'y']) |Token::Keyword(&[b'Y']) => match mode {
+                    Token::Keyword(value) if value == "y" || value == "Y" => match mode {
                         ModeType::Absolute => ModeType::AbsoluteY,
                         ModeType::ZeroPage => ModeType::ZeroPageY,
                         _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
@@ -491,7 +493,7 @@ impl<'a> AstGenerator<'a> {
         }
     }
     
-    fn generate_code_block(&self, context: &Context<'a>, token_index: usize, positon: usize) -> Result<(), AstGeneratorError> {
+    fn generate_code_block(&self, context: &Context, token_index: usize, positon: usize) -> Result<(), AstGeneratorError> {
 
         if INSTS_SIZE[positon] == 1 {
             context.add_ast(token_index,Ast::InstrImplied(positon));
@@ -517,8 +519,8 @@ impl<'a> AstGenerator<'a> {
 
             let token_index= self.eat()?;
             let token = &context.tokens.borrow()[token_index];
-            if let Token::Keyword(name) = token.token {
-                context.add_ast(token_index, Ast::InstrJump(positon, name));
+            if let Token::Keyword(name) = &token.token {
+                context.add_ast(token_index, Ast::InstrJump(positon, name.clone()));
                 return Ok(())
             }
 
@@ -534,44 +536,52 @@ impl<'a> AstGenerator<'a> {
         Ok(())
     }
     
-    fn inline_generate(&'a self, context: &Context<'a>) -> Result<(), AstGeneratorError> {
+    fn inline_generate(&self, context: &Context) -> Result<(), AstGeneratorError> {
         self.size.set(context.tokens.borrow().len());
+        let mut token_index = 0;
 
         while self.size.get() > self.index.get() {
-            let token_index = self.eat()?;
+            {
+                token_index = self.eat()?;
+                let tokens = context.tokens.borrow();
 
-            match &context.tokens.borrow().get(token_index).map(|item| &item.token) {
-                Some(Token::Instr(positon)) => self.generate_code_block(&context, token_index, *positon)?,
-                Some(Token::Keyword(keyword)) => self.generate_assign(&context, token_index, keyword)?,
-                Some(Token::Directive(option)) => self.generate_directive(&context, token_index, option)?,
-                Some(Token::Comment(_)) => (),
-                Some(Token::Branch(name)) => self.generate_branch(&context, token_index, name, BranchType::Generic)?,
-                Some(Token::Byte(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Number not expected".to_string())),
-                Some(Token::Word(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Number not expected".to_string())),
-                Some(Token::NewLine(_)) => (),
-                Some(Token::Space(_)) => (),
-                Some(Token::OpenParenthesis) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'(' not expected".to_string())),
-                Some(Token::CloseParenthesis) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "')' not expected".to_string())),
-                Some(Token::Sharp) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'#' not expected".to_string())),
-                Some(Token::Assign) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'=' not expected".to_string())),
-                Some(Token::Comma) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "',' not expected".to_string())),
-                Some(Token::String(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "String not expected".to_string())),
-                Some(Token::BranchNext(name)) => self.generate_branch(&context, token_index, name, BranchType::Next)?,
-                Some(Token::End) => break,
-                None => return Err(AstGeneratorError::InternalError)
+                match &tokens.get(token_index).map(|item| &item.token) {
+                    Some(Token::Instr(positon)) => self.generate_code_block(&context, token_index, *positon)?,
+                    Some(Token::Keyword(keyword)) => self.generate_assign(&context, token_index, keyword)?,
+                    Some(Token::Directive(option)) => self.generate_directive(&context, token_index, option)?,
+                    Some(Token::Comment(_)) => (),
+                    Some(Token::Branch(name)) => self.generate_branch(&context, token_index, name, BranchType::Generic)?,
+                    Some(Token::Byte(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Number not expected".to_string())),
+                    Some(Token::Word(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Number not expected".to_string())),
+                    Some(Token::NewLine(_)) => (),
+                    Some(Token::Space(_)) => (),
+                    Some(Token::OpenParenthesis) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'(' not expected".to_string())),
+                    Some(Token::CloseParenthesis) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "')' not expected".to_string())),
+                    Some(Token::Sharp) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'#' not expected".to_string())),
+                    Some(Token::Assign) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "'=' not expected".to_string())),
+                    Some(Token::Comma) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "',' not expected".to_string())),
+                    Some(Token::String(_)) => return Err(AstGeneratorError::syntax_issue(&context, token_index, "String not expected".to_string())),
+                    Some(Token::BranchNext(name)) => self.generate_branch(&context, token_index, name, BranchType::Next)?,
+                    Some(Token::End) => break,
+                    None => return Err(AstGeneratorError::InternalError)
+                }
+            }
+
+            if let Some(Ast::Directive(DirectiveEnum::Include, values)) = context.asts.borrow().last().map(|ast| &ast.ast) {
+                self.process_include(context, token_index, &values[0])?;
             }
         }
 
         Ok(())
     }
     
-    pub fn generate(&'a self, context: Context<'a>) -> Result<Context<'a>, AstGeneratorError> {
+    pub fn generate(&self, context: Context) -> Result<Context, AstGeneratorError> {
         match self.inline_generate(&context) {
             Ok(_) => Ok(context),
             Err(error) => {
                 let tokens = context.tokens.borrow();
                 let token = &tokens[self.index.get() - 1];
-                print_error(&context.source, &error, token.line, token.column, token.end);
+                print_error(&context.target, &error, token.line, token.column, token.end);
                 Err(error)
             }
         }

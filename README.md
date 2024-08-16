@@ -33,6 +33,43 @@ Expected output:
 0610: fb 60 00
 ```
 
+## Data types
+Compiler works with primative date types. 
+
+### Byte
+It takes up one byte of space. It is written in three different ways depending on the number type.
+Examples:
+```assembly
+$01       ; in decimal format
+$CC       ; in decimal format
+
+%00000000 ; in binary format
+%01010011 ; in binary format
+
+128       ; in decimal format
+2         ; in decimal format
+```
+
+### Word
+It takes up two bytes of space. It is written in three different ways depending on the number type.
+Examples:
+```assembly
+$0122             ; in decimal format
+$CC33             ; in decimal format
+
+%0000000000000000 ; in binary format
+%0101001100000000 ; in binary format
+
+123456            ; in decimal format
+888888            ; in decimal format
+```
+
+### Ascii
+It takes up different sizes of space depending on the definition. The text must be written between double quotes.
+```assembly
+"Hello world" ; in decimal format
+```
+
 ## Available directives
 
 ### .org
@@ -100,6 +137,17 @@ Include a file as binary data.
 Print warning message on compilation time.
 ```assembly
 .warning "timu6502asm compiler works partial"
+```
+```
+22:05:16 [WARN] timu6502asm compiler works partial
+```
+
+### .include
+Import another file.
+```assembly
+.include "header.asm"
+.include "body.asm"
+.include "footer.asm"
 ```
 ```
 22:05:16 [WARN] timu6502asm compiler works partial

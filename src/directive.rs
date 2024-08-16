@@ -14,17 +14,17 @@ pub enum DirectiveEnum {
     Include
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 #[derive(EnumDiscriminants)]
 #[strum_discriminants(name(DirectiveType))]
-pub enum DirectiveValue<'a> {
+pub enum DirectiveValue {
     Byte(u8),
     Word(u16),
-    String(&'a [u8]),
-    Reference(&'a [u8]),
+    String(String),
+    Reference(String),
 }
 
-impl<'a> DirectiveValue<'a> {
+impl DirectiveValue {
     pub fn get_word(&self) -> Result<u16, CodeGeneratorError> {
         
         match self {
@@ -51,21 +51,21 @@ pub enum DirectiveVariableSize {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DirectiveInfo {
-    pub name: &'static [u8],
+    pub name: &'static str,
     pub directive: DirectiveEnum,
     pub size: DirectiveVariableSize,
     pub values: &'static [DirectiveType]
 }
 
 pub const SYSTEM_DIRECTIVES: &[DirectiveInfo] = &[
-    DirectiveInfo { name: b"BYTE",    directive: DirectiveEnum::Byte,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::String] },
-    DirectiveInfo { name: b"DB",      directive: DirectiveEnum::Byte,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::String] },
-    DirectiveInfo { name: b"WORD",    directive: DirectiveEnum::Word,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Word] },
-    DirectiveInfo { name: b"DW",      directive: DirectiveEnum::Word,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Word] },
-    DirectiveInfo { name: b"ORG",     directive: DirectiveEnum::Org,     size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::Word] },
-    DirectiveInfo { name: b"INCBIN",  directive: DirectiveEnum::Incbin,  size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
-    DirectiveInfo { name: b"ASCII",   directive: DirectiveEnum::Ascii,   size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
-    DirectiveInfo { name: b"ASCIIZ",  directive: DirectiveEnum::Asciiz,  size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
-    DirectiveInfo { name: b"WARNING", directive: DirectiveEnum::Warning, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
-    DirectiveInfo { name: b"INCLUDE", directive: DirectiveEnum::Include, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
+    DirectiveInfo { name: "BYTE",    directive: DirectiveEnum::Byte,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::String] },
+    DirectiveInfo { name: "DB",      directive: DirectiveEnum::Byte,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::String] },
+    DirectiveInfo { name: "WORD",    directive: DirectiveEnum::Word,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::Word] },
+    DirectiveInfo { name: "DW",      directive: DirectiveEnum::Word,    size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::Word] },
+    DirectiveInfo { name: "ORG",     directive: DirectiveEnum::Org,     size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::Word] },
+    DirectiveInfo { name: "INCBIN",  directive: DirectiveEnum::Incbin,  size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
+    DirectiveInfo { name: "ASCII",   directive: DirectiveEnum::Ascii,   size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
+    DirectiveInfo { name: "ASCIIZ",  directive: DirectiveEnum::Asciiz,  size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
+    DirectiveInfo { name: "WARNING", directive: DirectiveEnum::Warning, size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String, DirectiveType::Word, DirectiveType::Byte] },
+    DirectiveInfo { name: "INCLUDE", directive: DirectiveEnum::Include, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
 ];

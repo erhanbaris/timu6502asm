@@ -23,11 +23,15 @@ fn main() {
     let _ = CombinedLogger::init(vec![TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)]);
     info!("timu6502asm Compiler");
 
-    let data = br#".include "test2.asm""#;
+    let data = br#"
+    .include "test2.asm"
+    ADC TEST
+    "#;
 
-    let context = Context::new(data);
+    let context = Context::default();
+    context.add_file("main.asm".to_string());
 
-    let mut parser = Parser::new(context);
+    let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
     parser.friendly_dump();
 
@@ -38,9 +42,5 @@ fn main() {
 
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
-    generator.dump(&context);
-
-    let mut file = File::create("tables.bin").unwrap();
-    file.write_all(&context.target).unwrap();
- 
+    generator.dump(&context); 
 }
