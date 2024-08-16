@@ -1,4 +1,4 @@
-use crate::{context::Context, opcode::{ModeType, INSTS}, tool::{print_error, upper_case_byte}};
+use crate::{context::Context, opcode::INSTS, tool::{print_error, upper_case_byte}};
 use log::info;
 use strum_macros::EnumDiscriminants;
 
@@ -54,6 +54,7 @@ pub enum Token<'a> {
 }
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct TokenInfo<'a> {
     pub line: usize,
     pub column: usize,
@@ -340,7 +341,7 @@ impl<'a> Parser<'a> {
                         b'a'..=b'z' => valid = true,
                         b'A'..=b'Z' => valid = true,
                         b'_' => (),
-                        b' ' | b',' | b'\t' => break,
+                        b' ' | b',' | b')' | b'=' | b'\t' => break,
                         b'\n' | b'\r' => break,
                         b':' => {
                             branch = true;

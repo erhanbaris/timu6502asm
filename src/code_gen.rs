@@ -13,14 +13,14 @@ use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, directive::{Direc
 pub enum CodeGeneratorError {
     #[error("Internal error")]
     InternalError,
+    #[error("Illegal opcode")]
+    IllegalOpcode,
     #[error("Number not applicable")]
     NumberNotApplicable,
     #[error("Branch information not found")]
     UnresolvedBranches,
     #[error("Reference information not found")]
     UnresolvedReference,
-    #[error("Invalid reference value")]
-    InvalidReferenceValue,
     #[error("Expected string")]
     StringExpected,
     #[error("IO Error ({0})")]
@@ -38,7 +38,6 @@ pub struct CodeGenerator<'a> {
 
     pub start_point: u16,
     pub branches: HashMap<&'a [u8], usize>,
-    pub references: HashMap<&'a [u8], Vec<DirectiveValue<'a>>>,
     pub unresolved_branches: Vec<(&'a [u8], usize, usize)>,
     pub unresolved_jumps: Vec<(&'a [u8], usize, usize)>
 }
@@ -52,7 +51,6 @@ impl<'a> CodeGenerator<'a> {
             branches: Default::default(),
             unresolved_branches: Default::default(),
             unresolved_jumps: Default::default(),
-            references: Default::default()
         }
     }
 
@@ -87,35 +85,19 @@ impl<'a> CodeGenerator<'a> {
 
     fn generate_instr(&mut self, target: &mut Vec<u8>, instr: usize, number: u16, mode: ModeType) -> Result<(), CodeGeneratorError> {
         let modes = MODES[instr];
+        let mut found = false;
         for search_mode in modes.iter() {
             if search_mode.mode == mode {
                 target.push(search_mode.opcode);
                 self.push_number(target, number, mode)?;
+                found = true;
+                break;
             }
         }
-        Ok(())
-    }
 
-    fn generate_instr_reference(&mut self, target: &mut Vec<u8>, instr: usize, reference: &'a [u8]) -> Result<(), CodeGeneratorError> {
-        let modes = MODES[instr];
-        let value = match self.references.get(reference) {
-            Some(value) => value,
-            None=> return Err(CodeGeneratorError::UnresolvedReference)
-        };
-
-        /*let (number, mode) = match value {
-            ReferenceValue::AbsoluteAddress(_) => return Err(CodeGeneratorError::InvalidReferenceValue),
-            ReferenceValue::RelativeAddress(_) => return Err(CodeGeneratorError::InvalidReferenceValue),
-            ReferenceValue::Value(number, mode) => (*number, *mode),
-        };
-
-        for search_mode in modes.iter() {
-            if search_mode.mode == mode {
-                target.push(search_mode.opcode);
-                self.push_number(target, number, mode)?;
-            }
-        }*/
-        
+        if !found {
+            return Err(CodeGeneratorError::IllegalOpcode)
+        }
         Ok(())
     }
 
@@ -150,11 +132,6 @@ impl<'a> CodeGenerator<'a> {
         let modes = MODES[position];
         target.push(modes[0].opcode);
         self.push_number(target, jump_position, ModeType::Absolute)?;
-        Ok(())
-    }
-
-    fn configure_assign(&mut self, name: &'a [u8], values: Vec<DirectiveValue<'a>>) -> Result<(), CodeGeneratorError> {
-        self.references.insert(name, values);
         Ok(())
     }
 
@@ -292,6 +269,7 @@ impl<'a> CodeGenerator<'a> {
             DirectiveEnum::Ascii => self.directive_ascii(target, values, false)?,
             DirectiveEnum::Asciiz => self.directive_ascii(target, values, true)?,
             DirectiveEnum::Warning => self.directive_warning(target, values)?,
+            DirectiveEnum::Include => (),
         };
         Ok(())
     }
@@ -309,10 +287,8 @@ impl<'a> CodeGenerator<'a> {
                 Some(Ast::InstrBranch(position, branch)) => self.generate_instr_branch(&mut context.target, ast_index, *position, *branch)?,
                 Some(Ast::InstrJump(position, branch)) => self.generate_instr_jump(&mut context.target, ast_index, *position, *branch)?,
                 Some(Ast::Instr(position, number, mode)) => self.generate_instr(&mut context.target, *position, *number, *mode)?,
-                Some(Ast::InstrRef(position, reference)) => self.generate_instr_reference(&mut context.target, *position, *reference)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
                 Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, &values)?,
-                Some(Ast::Assign(name, values)) => self.configure_assign(*name, values.clone())?,
                 None => return Err(CodeGeneratorError::InternalError)
             };
         }

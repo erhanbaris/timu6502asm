@@ -1,6 +1,8 @@
+use std::{fs::File, io::Read};
+
 use rstest::*;
 
-use crate::{ast::AstGenerator, code_gen::CodeGenerator, context::Context, parser::Parser};
+use crate::{ast::AstGenerator, code_gen::{CodeGenerator, CodeGeneratorError}, context::Context, parser::Parser};
 
 #[rstest]
 #[case(br#"LDX #$08
@@ -169,6 +171,18 @@ LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 #[case(br#".word $2211, $4433,$6655, $8877"#, &[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])]
 #[case(br#".byte $ff
 .asciiz "abcd""#, &[0xFF, 0x61, 0x62, 0x63, 0x64, 0x00])]
+#[case(br#"AND #$dd"#, &[0x29, 0xdd])]
+#[case(br#"AND #$ffdd"#, &[0x29, 0xdd])]
+#[case(br#"AND $dd"#, &[0x25, 0xdd])]
+#[case(br#"AND $ffdd"#, &[0x2d, 0xdd, 0xff])]
+#[case(br#"AND ($ff, x)"#, &[0x21, 0xff])]
+#[case(br#"AND ($00ff, x)"#, &[0x21, 0xff])]
+#[case(br#"AND ($ff,Y )"#, &[0x31, 0xff])]
+#[case(br#"LDX $ff,Y"#, &[0xb6, 0xff])]
+#[case(br#"AND $ff,x"#, &[0x35, 0xff])]
+#[case(br#"AND $ffdd , x"#, &[0x3d, 0xdd, 0xff])]
+#[case(br#"LDX $ffdd , y"#, &[0xBE, 0xdd, 0xff])]
+#[case(br#"JMP ($ffdd)"#, &[0x6c, 0xdd, 0xff])] // Only jump has indirect mode
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::new(data);
 
@@ -238,4 +252,49 @@ fn ast_generator_fail(#[case] data: &'_ [u8]) {
 
   let ast_generator = AstGenerator::new();
   assert!(ast_generator.generate(context).is_err());
+}
+#[rstest]
+#[case(br#"AND ($ffdd)"#)]
+fn compile_failure(#[case] data: &'_ [u8]) {
+  let context = Context::new(data);
+  let mut parser = Parser::new(context);
+  parser.parse().unwrap();
+  parser.friendly_dump();
+
+  let context = parser.context;
+
+  let ast_generator = AstGenerator::new();
+  let context = ast_generator.generate(context).unwrap();
+  
+  let mut generator = CodeGenerator::new();
+  match generator.generate(context).unwrap_err() {
+    CodeGeneratorError::IllegalOpcode => (),
+    _ => {panic!("Invalid error code");}
+  };
+}
+
+#[rstest]
+#[case("src/tests/asms/tables.asm", "src/tests/bins/tables.bin")]
+fn test_file(#[case] code_filename: &str, #[case] expected_filename: &str) {
+    let mut code = Vec::new();
+    let mut file = File::open(code_filename).unwrap();
+    file.read_to_end(&mut code).unwrap();
+
+    let mut binary = Vec::new();
+    let mut file = File::open(expected_filename).unwrap();
+    file.read_to_end(&mut binary).unwrap();
+
+    let context = Context::new(&code);
+
+    let mut parser = Parser::new(context);
+    parser.parse().unwrap();
+
+    let context = parser.context;
+
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    let context = generator.generate(context).unwrap();
+    assert_eq!(context.target, binary);
 }

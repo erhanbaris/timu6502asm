@@ -23,9 +23,7 @@ fn main() {
     let _ = CombinedLogger::init(vec![TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)]);
     info!("timu6502asm Compiler");
 
-    let data = br#"
-PRG_COUNT       = 1 
-.byte PRG_COUNT, PRG_COUNT, PRG_COUNT"#;
+    let data = br#".include "test2.asm""#;
 
     let context = Context::new(data);
 

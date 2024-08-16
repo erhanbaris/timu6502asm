@@ -1,6 +1,6 @@
-use std::{cell::{Cell, Ref}, marker::PhantomData};
+use std::{cell::Cell, fs::File, io::Read, marker::PhantomData};
 
-use crate::{context::Context, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, parser::{Token, TokenInfo, TokenType}, tool::{print_error, upper_case}};
+use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenInfo, TokenType}, tool::{print_error, upper_case}};
 
 #[derive(Debug, Copy, Clone)]
 pub enum BranchType {
@@ -14,10 +14,8 @@ pub enum Ast<'a> {
     InstrBranch(usize, &'a [u8]),
     InstrJump(usize, &'a [u8]),
     Instr(usize, u16, ModeType),
-    InstrRef(usize, &'a [u8]),
     Branch(&'a [u8], BranchType),
-    Directive(DirectiveEnum, Vec<DirectiveValue<'a>>),
-    Assign(&'a [u8], Vec<DirectiveValue<'a>>)
+    Directive(DirectiveEnum, Vec<DirectiveValue<'a>>)
 }
 
 #[derive(Debug)]
@@ -48,7 +46,8 @@ pub enum AstGeneratorError {
         #[allow(dead_code)] message: String
     },
     OutOfScope,
-    InternalError
+    InternalError,
+    FileNotValid
 }
 
 impl AstGeneratorError {
@@ -90,6 +89,16 @@ impl<'a> AstGenerator<'a> {
     fn peek(&self)-> Result<usize, AstGeneratorError> {
         self.empty_check()?;
         Ok(self.index.get())
+    }
+    
+    fn eat_expected(&self, context: &Context<'a>, token_type: TokenType, error: AstGeneratorError) -> Result<(), AstGeneratorError> {
+        let token_index = self.eat()?;
+        let token = &context.tokens.borrow()[token_index];
+
+        if TokenType::from(&token.token) != token_type {
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn eat_space(&self, context: &Context<'a>) -> Result<(), AstGeneratorError> {
@@ -136,22 +145,69 @@ impl<'a> AstGenerator<'a> {
             _ => None
         }
     }
-
+    
     fn eat_if_number(&self, context: &Context<'a>) -> Option<(u16, ModeType)> {
-        let index = self.eat_if(context, TokenType::Word)?;
-        let token = &context.tokens.borrow()[index];
-        match token.token {
-            Token::Byte(number) => Some((number as u16, ModeType::ZeroPage)),
-            Token::Word(number) => Some((number, ModeType::Absolute)),
-            Token::Keyword(keyword) => {
-                if let Some(values) = context.references.borrow().get(keyword) {
 
+        if let Ok(mut position) = self.peek() {
+            let tokens = context.tokens.borrow();
+            let mut immediate = false;
+            let mut mode = ModeType::ZeroPage;
+            let mut number = 0_u16;
+            let index = self.index.get();
+            
+            if let Token::Sharp = &tokens[position].token {
+                let _ = self.eat();
+                immediate = true;
+                if let Ok(new_position) = self.peek() {
+                    position = new_position;
+                } else {
+                    self.index.set(index);
+                    return None;
+                }
+            }
+            
+            if let Token::Byte(byte) = &tokens[position].token {
+                let _ = self.eat();
+                mode = ModeType::ZeroPage;
+                number = *byte as u16;
+            }
+
+            else if let Token::Word(word) = &tokens[position].token {
+                let _ = self.eat();
+                mode = ModeType::Absolute;
+                number = *word;
+            }
+
+            else if let Token::Keyword(keyword) = &tokens[position].token {
+                let references = context.references.borrow();
+                let values = references.get(keyword)?;
+                if values.len() != 1 {
+                    self.index.set(index);
+                    return None
                 }
 
-                Some((0, ModeType::Absolute))
-            },
-            _ => None
+                let first_value = values[0];
+                (number, mode) = match first_value {
+                    DirectiveValue::Byte(number) => (number as u16, ModeType::ZeroPage),
+                    DirectiveValue::Word(number) => (number as u16, ModeType::Absolute),
+                    _ => {
+                        self.index.set(index);
+                        return None
+                    }
+                };
+                let _ = self.eat();
+            }
+
+            return match immediate {
+                true => Some((number, ModeType::Immediate)),
+                false => match mode == ModeType::Absolute {
+                    true => Some((number, ModeType::Absolute)),
+                    false => Some(((number as u8) as u16, ModeType::ZeroPage)),
+                },
+            };
         }
+
+        None
     }
 
     fn eat_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
@@ -277,10 +333,52 @@ impl<'a> AstGenerator<'a> {
                 return Err(AstGeneratorError::syntax_issue(context, token_index, "Missing information".to_string()))
             }
 
-            context.add_ast(token_index,Ast::Directive(directive.directive, values));
+            if DirectiveEnum::Include == directive.directive {
+                self.process_include(context, token_index, &values[0])?;
+            }
+
+            context.add_ast(token_index, Ast::Directive(directive.directive, values));
+
         } else {
             return Err(AstGeneratorError::syntax_issue(context, token_index, "Unsupported compiler configuration".to_string()))
         }
+        Ok(())
+    }
+
+    fn process_include(&self, context: &Context<'a>, token_index: usize, value: &DirectiveValue<'a>) -> Result<(), AstGeneratorError> {
+        let file_path = match value {
+            DirectiveValue::String(name) => name,
+            _ => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Path expected as a string".to_string()))
+        };
+
+        let file_path = match std::str::from_utf8(file_path) {
+            Ok(file_path) => file_path,
+            _ => return Err(AstGeneratorError::syntax_issue(&context, token_index, "Invalid text format".to_string()))
+        };
+
+        let mut file = match File::open(file_path) {
+            Ok(file) => file,
+            Err(_) => return Err(AstGeneratorError::FileNotValid)
+        };
+
+        let mut code = Vec::new();
+        match file.read_to_end(&mut code) {
+            Ok(_) => (),
+            Err(_) => return Err(AstGeneratorError::FileNotValid)
+        };
+
+        let new_context = Context::new(&code);
+
+        let mut parser = Parser::new(new_context);
+        parser.parse().unwrap();
+
+        let mut tokens = context.tokens.borrow_mut();
+        let current_position = self.index.get();
+
+        for token in new_context.tokens.borrow().iter().rev() {
+            tokens.insert(current_position, token.clone());
+        }
+
         Ok(())
     }
 
@@ -299,21 +397,98 @@ impl<'a> AstGenerator<'a> {
         Ok(())
     }
 
-    fn try_parse_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
-        self.eat_space(context)?;
+    pub(crate) fn try_parse_number(&self, context: &Context<'a>) -> Result<(u16, ModeType), AstGeneratorError> {
+        self.cleanup_space(context)?;
         let tokens = context.tokens.borrow();
         let token_index = self.peek()?;
-        let token = &context.tokens.borrow()[token_index];
+        let token = &tokens[token_index];
 
         if let Token::OpenParenthesis = token.token {
-            self.eat_space(context)?;
+            let mut mode = ModeType::Indirect;
+            let mut parenthesis_closed = false;
+            self.eat()?;
+            self.cleanup_space(context)?;
             
-            if let Some((number, mode)) = self.eat_if_number(context) {
+            let Some((number, _)) = self.eat_if_number(context) else {
+                return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()));
+            };
 
+            self.cleanup_space(context)?;
+
+            let token_index = self.peek()?;
+            let token = &tokens[token_index];
+            if let Token::OpenParenthesis = token.token {
+                self.eat()?;
+                parenthesis_closed = true;
             }
-        }
+            
+            self.cleanup_space(context)?;
+            let token_index = self.peek()?;
+            let token = &tokens[token_index];
+            if let Token::Comma = token.token {
+                self.eat()?;
+                self.cleanup_space(context)?;
 
-        Ok(())
+                let token_index = self.peek()?;
+                let token = &tokens[token_index];
+
+                mode = match &token.token {
+                    Token::Keyword(&[b'x']) |Token::Keyword(&[b'X']) => ModeType::IndirectX,
+                    Token::Keyword(&[b'y']) |Token::Keyword(&[b'Y']) => ModeType::IndirectY,
+                    _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X or Y".to_string()))
+                };
+
+                
+                self.eat()?;
+            }
+
+            self.cleanup_space(context)?;
+
+            if !parenthesis_closed {
+                self.eat_expected(context, TokenType::CloseParenthesis, AstGeneratorError::syntax_issue(context, token_index, "Expected ')'".to_string()))?;
+            }
+
+            return Ok((number, mode));
+
+        } else {
+            self.cleanup_space(context)?;
+            
+            let Some((number, mut mode)) = self.eat_if_number(context) else {
+                return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()));
+            };
+
+            if mode == ModeType::Immediate {
+                return Ok((number, mode));
+            }
+
+            self.cleanup_space(context)?;
+            let token_index = self.peek()?;
+            let token = &tokens[token_index];
+            if let Token::Comma = token.token {
+                self.eat()?;
+                self.cleanup_space(context)?;
+
+                let token_index = self.peek()?;
+                let token = &tokens[token_index];
+
+                mode = match &token.token {
+                    Token::Keyword(&[b'x']) |Token::Keyword(&[b'X']) => match mode {
+                        ModeType::Absolute => ModeType::AbsoluteX,
+                        ModeType::ZeroPage => ModeType::ZeroPageX,
+                        _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
+                    },
+                    Token::Keyword(&[b'y']) |Token::Keyword(&[b'Y']) => match mode {
+                        ModeType::Absolute => ModeType::AbsoluteY,
+                        ModeType::ZeroPage => ModeType::ZeroPageY,
+                        _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
+                    },
+                    _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X or Y".to_string()))
+                };
+                self.eat()?;
+            }
+
+            return Ok((number, mode));
+        }
     }
     
     fn generate_code_block(&self, context: &Context<'a>, token_index: usize, positon: usize) -> Result<(), AstGeneratorError> {
@@ -332,30 +507,28 @@ impl<'a> AstGenerator<'a> {
         else if JUMP_INSTS.contains(&positon) {
             // Jump inst
             self.eat_space(context)?;
+            let index = self.index.get();
+            if let Ok((number, mode)) = self.try_parse_number(context) {
+                context.add_ast(token_index, Ast::Instr(positon, number, mode));
+                return Ok(())
+            }
+
+            self.index.set(index); // Restore index
+
             let token_index= self.eat()?;
             let token = &context.tokens.borrow()[token_index];
-            let ast = match token.token {
-                Token::Keyword(name) => Ast::InstrJump(positon, name),
-                Token::Byte(number) => Ast::Instr(positon, number, ModeType::Absolute),
-                Token::Word(number) => Ast::Instr(positon, number, ModeType::Indirect),
-                _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Branch name, absolute address or indirect address expected".to_string())),
-            };
-            context.add_ast(token_index, ast);
+            if let Token::Keyword(name) = token.token {
+                context.add_ast(token_index, Ast::InstrJump(positon, name));
+                return Ok(())
+            }
+
+            return Err(AstGeneratorError::syntax_issue(context, token_index, "Branch name, absolute address or indirect address expected".to_string()))
         }
 
         else {
             self.eat_space(context)?;
-
-            let token_index= self.eat()?;
-            let token = &context.tokens.borrow()[token_index];
-
-            let ast = match &token.token {
-                Token::Keyword(keyword) => Ast::InstrRef(positon, keyword),
-                Token::Byte(number, mode) => Ast::Instr(positon, *number, *mode),
-                _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Keyword or reference expected".to_string()))
-            };
-
-            context.add_ast(token_index, ast);
+            let (number, mode) = self.try_parse_number(context)?;
+            context.add_ast(token_index, Ast::Instr(positon, number, mode));
         }
         
         Ok(())

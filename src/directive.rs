@@ -10,7 +10,8 @@ pub enum DirectiveEnum {
     Word,
     Ascii,
     Asciiz,
-    Warning
+    Warning,
+    Include
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -66,4 +67,5 @@ pub const SYSTEM_DIRECTIVES: &[DirectiveInfo] = &[
     DirectiveInfo { name: b"ASCII",   directive: DirectiveEnum::Ascii,   size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
     DirectiveInfo { name: b"ASCIIZ",  directive: DirectiveEnum::Asciiz,  size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::String] },
     DirectiveInfo { name: b"WARNING", directive: DirectiveEnum::Warning, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
+    DirectiveInfo { name: b"INCLUDE", directive: DirectiveEnum::Include, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
 ];
