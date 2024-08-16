@@ -1,6 +1,10 @@
-use crate::{context::Context, opcode::{ModeType, INSTS}, tool::{print_error, upper_case_byte}};
+use core::str;
+use std::str::Utf8Error;
+
+use crate::{context::Context, opcode::INSTS, tool::{print_error, upper_case_byte}};
 use log::info;
 use strum_macros::EnumDiscriminants;
+use thiserror::Error;
 
 /*
 Address Modes
@@ -27,51 +31,77 @@ pub struct Parser<'a> {
     pub column: usize,
     pub end: usize,
     size: usize,
-    pub context: Context<'a>
+    pub context: Context,
+    pub data: &'a [u8],
+    pub file_id: usize
 }
 
 #[derive(Debug, PartialEq, Clone)]
 #[derive(EnumDiscriminants)]
 #[strum_discriminants(name(TokenType))]
-pub enum Token<'a> {
+pub enum Token {
     Instr(usize),
-    Keyword(&'a [u8]),
-    String(&'a [u8]),
-    Directive(&'a [u8]),
-    Comment(&'a [u8]),
+    Keyword(String),
+    String(String),
+    Directive(String),
+    Comment(String),
     Assign,
     Comma,
-    Branch(&'a [u8]),
-    BranchNext(&'a [u8]),
-    Number(u16, ModeType),
+    OpenParenthesis,
+    CloseParenthesis,
+    Sharp,
+    Branch(String),
+    BranchNext(String),
+    Byte(u8),
+    Word(u16),
     NewLine(usize),
     Space(usize),
     End,
 }
 
 #[derive(Debug)]
-pub struct TokenInfo<'a> {
+#[derive(Clone)]
+pub struct TokenInfo {
     pub line: usize,
     pub column: usize,
-    pub token: Token<'a>,
+    pub token: Token,
     pub end: usize,
+    pub file_id: usize
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ParseError {
+    #[error("Out of scope")]
     OutOfScope,
+    
+    #[error("Unexpeted symbol")]
     UnexpectedSymbol,
+    
+    #[error("Unknown token")]
     UnknownToken,
+    
+    #[error("Invalid number format")]
     InvalidNumberFormat,
+    
+    #[error("Invalid comment format")]
     InvalidCommentFormat,
+    
+    #[error("Invalid keyword")]
     InvalidKeyword,
+    
+    #[error("Invalid directive")]
     InvalidDirective,
-    InvalidString
+    
+    #[error("Invalid string")]
+    InvalidString,
+
+    #[error("Invalid text format ({0})")]
+    Utf8Error(#[from] Utf8Error),    
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(context: Context<'a>) -> Self {
-        let size = context.source.len();
+    pub fn new(file_id: usize,  data: &'a [u8], context: Context) -> Self {
+        let size = data.len();
 
         Self {
             index: 0,
@@ -79,16 +109,19 @@ impl<'a> Parser<'a> {
             column: 0,
             end: 0,
             size,
-            context
+            context,
+            data,
+            file_id
         }
     }
 
-    fn add_token(&mut self, token: Token<'a>) {
+    fn add_token(&mut self, token: Token) {
         self.context.tokens.borrow_mut().push(TokenInfo {
             line: self.line,
             column: self.column,
             end: self.end,
             token,
+            file_id: self.file_id
         });
     }
 
@@ -119,8 +152,8 @@ impl<'a> Parser<'a> {
         match self.inner_parse() {
             Ok(_) => Ok(()),
             Err(error) => {
-                println!("2{:?}", self.context.source);
-                print_error(&self.context.source, &error, self.line, self.column, self.end);
+                println!("2{:?}", self.data);
+                print_error(&self.data, &error, self.line, self.column, self.end);
                 Err(error)
             }
         }
@@ -128,12 +161,12 @@ impl<'a> Parser<'a> {
 
     fn peek(&mut self) -> Result<u8, ParseError> {
         self.empty_check()?;
-        Ok(self.context.source[self.index])
+        Ok(self.data[self.index])
     }
 
     fn peek2(&mut self) -> Result<u8, ParseError> {
         self.empty_check2()?;
-        Ok(self.context.source[self.index+1])
+        Ok(self.data[self.index+1])
     }
 
     fn peek_expected(&mut self, byte: u8, error: ParseError) -> Result<(), ParseError> {
@@ -147,7 +180,7 @@ impl<'a> Parser<'a> {
         self.empty_check()?;
         self.index += 1;
         self.end += 1;
-        Ok(self.context.source[self.index - 1])
+        Ok(self.data[self.index - 1])
     }
 
     fn eat_expected(&mut self, byte: u8, error: ParseError) -> Result<(), ParseError> {
@@ -193,20 +226,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn next(&mut self) -> Result<Token<'a>, ParseError> {
+    fn next(&mut self) -> Result<Token, ParseError> {
         let first = self.peek()?;
 
         match first {
-            b'$' => self.parse_absolute_hex(),
-            b'%' => self.parse_absolute_binary(),
+            b'$' => self.parse_hex(),
+            b'%' => self.parse_binary(),
             b'0'..=b'9' => self.parse_absolute_decimal(),
-            b'(' => self.parse_indirect(),
-            b'#' => self.parse_immediate(),
+            b'#' => self.parse_sharp(),
             b'a'..=b'z' | b'A'..=b'Z' => self.parse_keyword(),
             b'.' => self.parse_directive(),
             b'"' => self.parse_string(),
             b';' => self.parse_comment(),
             b'=' => self.parse_assign(),
+            b'(' => self.parse_open_parenthesis(),
+            b')' => self.parse_close_parenthesis(),
             b',' => self.parse_comma(),
             b'\r' | b'\n' => self.parse_newline(),
             b' ' | b'\t' => self.parse_whitespace(),
@@ -217,125 +251,36 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_absolute_mode(&mut self, number: u16, is_absolute: bool) -> Result<Token<'a>, ParseError> {
-        self.eat_spaces()?;
-
-        let current_index = self.index;
+    fn parse_absolute_decimal(&mut self) -> Result<Token, ParseError> {
         
-        if self.peek() == Ok(b',') {
-            self.eat()?; // Eat ,
-            self.eat_spaces()?;
+        let mut decimal_number: u16 = 0;
+        
+        while let Ok(n) = self.peek() {
+            let number = match n {
+                n @ b'0'..=b'9' => n - b'0',
+                b' ' | b'\r' | b'\t' | b'\n' | b',' | b')' => break,
+                _ => return Err(ParseError::InvalidNumberFormat),
+            };
 
-            match self.eat()? {
-                b'x' | b'X' => Ok(Token::Number(number, match is_absolute {
-                    true => ModeType::AbsoluteX,
-                    false => ModeType::ZeroPageX
-                })),
-                b'y' | b'Y' => Ok(Token::Number(number, match is_absolute {
-                    true => ModeType::AbsoluteY,
-                    false => ModeType::ZeroPageY
-                })),
-                _ => {
-                    self.index = current_index; // Restore index
-                    Ok(Token::Number(number, match is_absolute {
-                        true => ModeType::Absolute,
-                        false => ModeType::ZeroPage
-                    }))
-                },
-            }
-        } else {
-            Ok(Token::Number(number, match is_absolute {
-                true => ModeType::Absolute,
-                false => ModeType::ZeroPage
-            }))
+            decimal_number = (decimal_number * 10) + number as u16;
+            let _ = self.eat();
         }
-    }
 
-    fn parse_absolute_decimal(&mut self) -> Result<Token<'a>, ParseError> {
-        let (size, number) = self.parse_decimal()?;
-
-        self.parse_absolute_mode(number, size == 2)
-    }
-
-    fn parse_absolute_hex(&mut self) -> Result<Token<'a>, ParseError> {
-        self.eat_expected(b'$', ParseError::InvalidNumberFormat)?;
-     
-        let (size, number) = self.parse_hex()?;
-        self.parse_absolute_mode(number, size == 2)
-    }
-
-    fn parse_absolute_binary(&mut self) -> Result<Token<'a>, ParseError> {
-        self.eat_expected(b'%', ParseError::InvalidNumberFormat)?;
-
-        let (size, number) = self.parse_binary()?;
-        self.parse_absolute_mode(number, size == 2)
-    }
-
-    fn parse_indirect(&mut self) -> Result<Token<'a>, ParseError> {
-        self.eat_expected(b'(', ParseError::InvalidNumberFormat)?;
-        self.eat_spaces()?;
-
-        let first = self.eat();
-
-        let (size, number) = match first {
-            Ok(b'$') => self.parse_hex()?,
-            Ok(b'%') => self.parse_binary()?,
-            Ok(b'0'..=b'9') => {
-                let _ = self.dec(); // Give back what you eat
-                self.parse_decimal()?
-            },
-            _ => return Err(ParseError::InvalidNumberFormat),
+        let size = match decimal_number > 0xff_u16 {
+            true => 2,
+            false => 1
         };
 
-        if size == 2 { // For ($0x0000) to ($0xffff) numbers
-            self.eat_spaces()?;
-            self.eat_expected(b')', ParseError::InvalidNumberFormat)?;
-            return Ok(Token::Number(number, ModeType::Indirect));
-        }
-
-        self.eat_spaces()?;
-        let next_byte = self.eat()?;
-        match next_byte {
-            b',' => {
-                self.eat_spaces()?;
-                self.peek_expected(b'X', ParseError::InvalidNumberFormat).or(self.peek_expected(b'x', ParseError::InvalidNumberFormat))?;
-                let _ = self.eat(); // Eat x or X
-
-                self.eat_expected(b')', ParseError::InvalidNumberFormat)?;
-                Ok(Token::Number(number, ModeType::IndirectX))
-            }
-            b')' => {
-                self.eat_spaces()?;
-                self.eat_expected(b',', ParseError::InvalidNumberFormat)?;
-                self.eat_spaces()?;
-
-                self.peek_expected(b'Y', ParseError::InvalidNumberFormat).or(self.peek_expected(b'y', ParseError::InvalidNumberFormat))?;
-                let _ = self.eat(); // Eat y or Y
-                Ok(Token::Number(number, ModeType::IndirectY))
-            }
-            _ => Err(ParseError::InvalidNumberFormat),
+        match size {
+            1 => Ok(Token::Byte(decimal_number as u8)),
+            2 => Ok(Token::Word(decimal_number as u16)),
+            _ => Err(ParseError::InvalidNumberFormat)
         }
     }
 
-    fn parse_immediate(&mut self) -> Result<Token<'a>, ParseError> {
-        self.eat()?; //Eat # char
-
-        let number = self.parse_number()?;
-        Ok(Token::Number(number, ModeType::Immediate))
-    }
-
-    fn parse_number(&mut self) -> Result<u16, ParseError> {
-        match self.eat()? {
-            b'$' => self.parse_hex().map(|(_, number)| number),
-            b'%' => self.parse_binary().map(|(_, number)| number),
-            _ => {
-                self.dec()?;
-                self.parse_decimal().map(|(_, number)| number)
-            }
-        }
-    }
-
-    fn parse_hex(&mut self) -> Result<(u8, u16), ParseError> {
+    fn parse_hex(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b'$', ParseError::InvalidNumberFormat)?;
+    
         let mut hex_number: u16 = 0;
         let mut count: u8 = 0;
         
@@ -357,10 +302,16 @@ impl<'a> Parser<'a> {
             return Err(ParseError::InvalidNumberFormat);
         }
 
-        Ok((count / 2, hex_number))
+        match count / 2 {
+            1 => Ok(Token::Byte(hex_number as u8)),
+            2 => Ok(Token::Word(hex_number as u16)),
+            _ => Err(ParseError::InvalidNumberFormat)
+        }
     }
 
-    fn parse_binary(&mut self) -> Result<(u8, u16), ParseError> {
+    fn parse_binary(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b'%', ParseError::InvalidNumberFormat)?;
+
         let mut binary_number: u16 = 0b0000_0000_0000_0000;
         let mut count: u8 = 0;
         
@@ -380,31 +331,31 @@ impl<'a> Parser<'a> {
         if count != 8 && count != 16 {
             return Err(ParseError::InvalidNumberFormat);
         }
-
-        Ok((count / 8, binary_number))
-    }
-
-    fn parse_decimal(&mut self) -> Result<(u8, u16), ParseError> {
-        let mut decimal_number: u16 = 0;
         
-        while let Ok(n) = self.peek() {
-            let number = match n {
-                n @ b'0'..=b'9' => n - b'0',
-                b' ' | b'\r' | b'\t' | b'\n' | b',' | b')' => break,
-                _ => return Err(ParseError::InvalidNumberFormat),
-            };
-
-            decimal_number = (decimal_number * 10) + number as u16;
-            let _ = self.eat();
+        match count / 8 {
+            1 => Ok(Token::Byte(binary_number as u8)),
+            2 => Ok(Token::Word(binary_number as u16)),
+            _ => Err(ParseError::InvalidNumberFormat)
         }
 
-        Ok((match decimal_number > 0xff_u16 {
-            true => 2,
-            false => 1
-        }, decimal_number))
     }
 
-    fn parse_keyword(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_open_parenthesis(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b'(', ParseError::InvalidNumberFormat)?;
+        Ok(Token::OpenParenthesis)
+    }
+
+    fn parse_close_parenthesis(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b')', ParseError::InvalidNumberFormat)?;
+        Ok(Token::CloseParenthesis)
+    }
+
+    fn parse_sharp(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b'#', ParseError::InvalidNumberFormat)?;
+        Ok(Token::Sharp)
+    }
+
+    fn parse_keyword(&mut self) -> Result<Token, ParseError> {
         let start = self.index;
 
         let mut valid = false;
@@ -418,7 +369,7 @@ impl<'a> Parser<'a> {
                         b'a'..=b'z' => valid = true,
                         b'A'..=b'Z' => valid = true,
                         b'_' => (),
-                        b' ' | b'\t' => break,
+                        b' ' | b',' | b')' | b'=' | b'\t' => break,
                         b'\n' | b'\r' => break,
                         b':' => {
                             branch = true;
@@ -439,20 +390,20 @@ impl<'a> Parser<'a> {
         }
 
         if branch {
-            return Ok(Token::Branch(&self.context.source[start..self.index - 1]));
+            return Ok(Token::Branch(str::from_utf8(&self.data[start..self.index - 1])?.to_string()));
         }
 
         if self.index - start == 3 {
-            let search_insts: [u8; 3] = [upper_case_byte(self.context.source[start]), upper_case_byte(self.context.source[start + 1]), upper_case_byte(self.context.source[start + 2])];
+            let search_insts: [u8; 3] = [upper_case_byte(self.data[start]), upper_case_byte(self.data[start + 1]), upper_case_byte(self.data[start + 2])];
             if let Some(position) = INSTS.iter().position(|item| *item == &search_insts) {
                 return Ok(Token::Instr(position));
             }
         }
 
-        Ok(Token::Keyword(&self.context.source[start..self.index]))
+        Ok(Token::Keyword(str::from_utf8(&self.data[start..self.index])?.to_string()))
     }
 
-    fn parse_string(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_string(&mut self) -> Result<Token, ParseError> {
         self.eat_expected(b'"', ParseError::InvalidString)?;
         let start = self.index;
 
@@ -475,10 +426,10 @@ impl<'a> Parser<'a> {
         }
 
         self.eat_expected(b'"', ParseError::InvalidString)?;
-        Ok(Token::String(&self.context.source[start..self.index-1]))
+        Ok(Token::String(str::from_utf8(&self.data[start..self.index - 1])?.to_string()))
     }
 
-    fn parse_directive(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_directive(&mut self) -> Result<Token, ParseError> {
         self.eat_expected(b'.', ParseError::InvalidDirective)?;
         let start = self.index;
 
@@ -512,13 +463,13 @@ impl<'a> Parser<'a> {
         }
 
         if branch {
-            return Ok(Token::BranchNext(&self.context.source[start..self.index - 1]));
+            return Ok(Token::BranchNext(str::from_utf8(&self.data[start..self.index - 1])?.to_string()));
         }
 
-        Ok(Token::Directive(&self.context.source[start..self.index]))
+        Ok(Token::Directive(str::from_utf8(&self.data[start..self.index])?.to_string()))
     }
 
-    fn parse_comment(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_comment(&mut self) -> Result<Token, ParseError> {
         let start = self.index;
 
         loop {
@@ -527,27 +478,27 @@ impl<'a> Parser<'a> {
                     b'\n' | b'\r' => {
                         self.dec()?;
                         break;
-                    }
+                    },
                     _ => continue,
                 },
                 Err(ParseError::OutOfScope) => break,
                 _ => return Err(ParseError::InvalidCommentFormat),
             };
         }
-        Ok(Token::Comment(&self.context.source[start..self.index - 1]))
+        Ok(Token::Comment(str::from_utf8(&self.data[start..self.index - 1])?.to_string()))
     }
 
-    fn parse_assign(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_assign(&mut self) -> Result<Token, ParseError> {
         self.eat_expected(b'=', ParseError::UnexpectedSymbol)?;
         Ok(Token::Assign)
     }
 
-    fn parse_comma(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_comma(&mut self) -> Result<Token, ParseError> {
         self.eat_expected(b',', ParseError::UnexpectedSymbol)?;
         Ok(Token::Comma)
     }
 
-    fn parse_newline(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_newline(&mut self) -> Result<Token, ParseError> {
         let mut total_lines = 0;
 
         loop {
@@ -561,7 +512,7 @@ impl<'a> Parser<'a> {
         Ok(Token::NewLine(total_lines))
     }
 
-    fn parse_whitespace(&mut self) -> Result<Token<'a>, ParseError> {
+    fn parse_whitespace(&mut self) -> Result<Token, ParseError> {
         let mut total_whitespaces = 0;
 
         while let Ok(b' ') | Ok(b'\t') = self.peek() {
@@ -584,7 +535,11 @@ impl<'a> Parser<'a> {
                 Token::Directive(_) => "DIRECTIVE",
                 Token::Comment(_) => "COMMENT",
                 Token::Branch(_) => "BRANCH",
-                Token::Number(_, _) => "NUMBER",
+                Token::Byte(_) => "BYTE",
+                Token::Word(_) => "WORD",
+                Token::OpenParenthesis => "(",
+                Token::CloseParenthesis => ")",
+                Token::Sharp => "#",
                 Token::NewLine(_) => "NEWLINE",
                 Token::Space(_) => "SPACE",
                 Token::End => "END",

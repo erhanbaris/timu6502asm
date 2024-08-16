@@ -1,26 +1,18 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
-use crate::{ast::{Ast, AstInfo}, parser::TokenInfo};
+use crate::{ast::{Ast, AstInfo}, directive::DirectiveValue, parser::TokenInfo};
 
-#[derive(Debug)]
-pub struct Context<'a> {
-    pub source: &'a [u8],
+#[derive(Debug, Default)]
+pub struct Context {
     pub target: Vec<u8>,
-    pub tokens: RefCell<Vec<TokenInfo<'a>>>,
-    pub asts: RefCell<Vec<AstInfo<'a>>>,
+    pub tokens: RefCell<Vec<TokenInfo>>,
+    pub asts: RefCell<Vec<AstInfo>>,
+    pub references: RefCell<HashMap<String, Vec<DirectiveValue>>>,
+    pub files: RefCell<Vec<String>>
 }
 
-impl<'a> Context<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self {
-            target: Vec::new(),
-            asts: Default::default(),
-            source: data,
-            tokens: Default::default()
-        }
-    }
-    
-    pub fn add_ast(&self, token_index: usize, ast: Ast<'a>) {
+impl Context {
+    pub fn add_ast(&self, token_index: usize, ast: Ast) {
         let token_info = &self.tokens.borrow()[token_index];
 
         let info = AstInfo {
@@ -31,5 +23,13 @@ impl<'a> Context<'a> {
         };
 
         self.asts.borrow_mut().push(info);
+    }
+
+    pub fn add_file(&self, file: String) {
+        self.files.borrow_mut().push(file);
+    }
+
+    pub fn last_file_id(&self) -> usize {
+        self.files.borrow().len() - 1
     }
 }

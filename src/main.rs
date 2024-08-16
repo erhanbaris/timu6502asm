@@ -2,7 +2,7 @@ mod opcode;
 mod parser;
 mod code_gen;
 mod ast;
-mod options;
+mod directive;
 mod tool;
 mod context;
 #[cfg(test)]
@@ -16,16 +16,22 @@ use code_gen::CodeGenerator;
 use context::Context;
 use parser::Parser;
 
+use std::fs::File;
+use std::io::prelude::*;
 
 fn main() {
     let _ = CombinedLogger::init(vec![TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)]);
     info!("timu6502asm Compiler");
 
-    let data = br#".byte $ff"#;
+    let data = br#"
+    .include "test2.asm"
+    ADC TEST
+    "#;
 
-    let context = Context::new(data);
+    let context = Context::default();
+    context.add_file("main.asm".to_string());
 
-    let mut parser = Parser::new(context);
+    let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
     parser.friendly_dump();
 
@@ -36,5 +42,5 @@ fn main() {
 
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
-    generator.dump(&context);
+    generator.dump(&context); 
 }

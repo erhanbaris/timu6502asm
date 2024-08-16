@@ -15,6 +15,7 @@ pub fn upper_case_byte(byte: u8) -> u8 {
 }
 
 pub fn print_error<T: Debug>(data: &'_ [u8], error: &T, line: usize, column: usize, end: usize) {
+    return;
     let mut line_index = 0;
     let mut start_index = 0;
     let mut end_index = data.len()-1;
