@@ -3,13 +3,6 @@ use std::fmt::Debug;
 
 use log::error;
 
-pub fn upper_case(bytes: &[u8]) -> Vec<u8> {
-    bytes
-        .into_iter()
-        .map(|byte| if *byte >= 97 { *byte - 32 } else { *byte })
-        .collect::<Vec<u8>>()
-}
-
 pub fn upper_case_byte(byte: u8) -> u8 { 
     if byte >= 97 { byte - 32 } else { byte }
 }

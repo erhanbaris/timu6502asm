@@ -169,13 +169,6 @@ impl<'a> Parser<'a> {
         Ok(self.data[self.index+1])
     }
 
-    fn peek_expected(&mut self, byte: u8, error: ParseError) -> Result<(), ParseError> {
-        if self.peek()? != byte {
-            return Err(error);
-        }
-        Ok(())
-    }
-
     fn eat(&mut self) -> Result<u8, ParseError> {
         self.empty_check()?;
         self.index += 1;
@@ -187,18 +180,6 @@ impl<'a> Parser<'a> {
         if self.eat()? != byte {
             return Err(error);
         }
-        Ok(())
-    }
-
-    fn eat_spaces(&mut self) -> Result<(), ParseError> {
-        loop {
-            if self.peek() == Ok(b' ') || self.peek() == Ok(b'\t') {
-                self.eat()?;
-            } else {
-                break;
-            }
-        }
-
         Ok(())
     }
 

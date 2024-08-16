@@ -23,24 +23,6 @@ pub enum DirectiveValue {
     Reference(&'a [u8]),
 }
 
-impl DirectiveValue {
-    pub fn get_word(&self) -> Result<u16, CodeGeneratorError> {
-        
-        match self {
-            DirectiveValue::Word(number) => Ok(*number),
-            _ => Err(CodeGeneratorError::ExpectedThis("Word information"))
-        }
-    }
-
-    pub fn get_byte(&self) -> Result<u8, CodeGeneratorError> {
-        
-        match self {
-            DirectiveValue::Byte(number) => Ok(*number),
-            _ => Err(CodeGeneratorError::ExpectedThis("Byte information"))
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DirectiveVariableSize {
     None,

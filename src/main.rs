@@ -16,9 +16,6 @@ use code_gen::CodeGenerator;
 use context::Context;
 use parser::Parser;
 
-use std::fs::File;
-use std::io::prelude::*;
-
 fn main() {
     let _ = CombinedLogger::init(vec![TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)]);
     info!("timu6502asm Compiler");

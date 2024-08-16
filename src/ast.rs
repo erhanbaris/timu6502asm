@@ -1,8 +1,8 @@
-use std::{cell::Cell, fs::File, io::Read, marker::PhantomData};
+use std::{cell::Cell, fs::File, io::Read};
 
 use thiserror::Error;
 
-use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenInfo, TokenType}, tool::{print_error, upper_case}};
+use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenType}, tool::print_error};
 
 #[derive(Debug, Copy, Clone)]
 pub enum BranchType {
@@ -26,17 +26,6 @@ pub struct AstInfo {
     pub column: usize,
     pub ast: Ast,
     pub end: usize,
-}
-
-impl AstInfo {
-    pub fn new(token: &TokenInfo, ast: Ast) -> Self {
-        Self {
-            line: token.line,
-            column: token.column,
-            end: token.end,
-            ast
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -125,33 +114,6 @@ impl AstGenerator {
         }
         Ok(())
     }
-
-    fn eat_if(&self, context: &Context, expected: TokenType) -> Option<usize> {
-        let token_index = match self.peek() {
-            Ok(token_index) => token_index,
-            Err(_) => return None
-        };
-
-        let token = &context.tokens.borrow()[token_index];
-        let token_type: TokenType = TokenType::from(&token.token);
-        
-        match token_type == expected {
-            true => {
-                self.index.set(self.index.get() + 1);
-                Some(token_index)
-            }
-            false => None
-        }
-    }
-
-    fn eat_if_string(&self, context: &Context) -> Option<String> {
-        let index = self.eat_if(context, TokenType::String)?;
-        let token = &context.tokens.borrow()[index];
-        match &token.token {
-            Token::String(string) => Some(string.clone()),
-            _ => None
-        }
-    }
     
     fn eat_if_number(&self, context: &Context) -> Option<(u16, ModeType)> {
 
@@ -215,25 +177,6 @@ impl AstGenerator {
         }
 
         None
-    }
-
-    fn eat_number(&self, context: &Context) -> Result<(u16, ModeType), AstGeneratorError> {
-        let token_index= self.eat()?;
-        let token = &context.tokens.borrow()[token_index];
-        match token.token {
-            Token::Byte(number) => Ok((number as u16, ModeType::ZeroPage)),
-            Token::Word(number) => Ok((number, ModeType::Absolute)),
-            _ => Err(AstGeneratorError::syntax_issue(context, token_index, "Expected number".to_string()))
-        }
-    }
-    
-    fn eat_string(&self, context: &Context) -> Result<String, AstGeneratorError> {
-        let token_index= self.eat()?;
-        let token = &context.tokens.borrow()[token_index];
-        match &token.token {
-            Token::String(string) => Ok(string.clone()),
-            _ => Err(AstGeneratorError::syntax_issue(context, token_index, "Expected string".to_string()))
-        }
     }
     
     fn eat_assign(&self, context: &Context) -> Result<(), AstGeneratorError> {
