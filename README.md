@@ -40,8 +40,8 @@ Compiler works with primative date types.
 It takes up one byte of space. It is written in three different ways depending on the number type.
 Examples:
 ```assembly
-$01       ; in decimal format
-$CC       ; in decimal format
+$01       ; in hexadecimal format
+$CC       ; in hexadecimal format
 
 %00000000 ; in binary format
 %01010011 ; in binary format
@@ -54,8 +54,8 @@ $CC       ; in decimal format
 It takes up two bytes of space. It is written in three different ways depending on the number type.
 Examples:
 ```assembly
-$0122             ; in decimal format
-$CC33             ; in decimal format
+$0122             ; in hexadecimal format
+$CC33             ; in hexadecimal format
 
 %0000000000000000 ; in binary format
 %0101001100000000 ; in binary format
