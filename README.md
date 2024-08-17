@@ -158,7 +158,7 @@ There are many things to do. Here are the some todos:
  - [ ] Rom file generation
  - [ ] Decompiler
  - [ ] Human friendly prints
- - [ ] Import different asm files
+ - [X] Import different asm files
  - [ ] Performance measurement
  - [ ] Documentation
  - [ ] Deploy on real hardware
