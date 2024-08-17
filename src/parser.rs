@@ -152,8 +152,7 @@ impl<'a> Parser<'a> {
         match self.inner_parse() {
             Ok(_) => Ok(()),
             Err(error) => {
-                println!("2{:?}", self.data);
-                print_error(&self.data, &error, self.line, self.column, self.end);
+                print_error(self.data, &error, self.line, self.column, self.end);
                 Err(error)
             }
         }
@@ -254,7 +253,7 @@ impl<'a> Parser<'a> {
 
         match size {
             1 => Ok(Token::Byte(decimal_number as u8)),
-            2 => Ok(Token::Word(decimal_number as u16)),
+            2 => Ok(Token::Word(decimal_number)),
             _ => Err(ParseError::InvalidNumberFormat)
         }
     }
@@ -285,7 +284,7 @@ impl<'a> Parser<'a> {
 
         match count / 2 {
             1 => Ok(Token::Byte(hex_number as u8)),
-            2 => Ok(Token::Word(hex_number as u16)),
+            2 => Ok(Token::Word(hex_number)),
             _ => Err(ParseError::InvalidNumberFormat)
         }
     }
@@ -315,7 +314,7 @@ impl<'a> Parser<'a> {
         
         match count / 8 {
             1 => Ok(Token::Byte(binary_number as u8)),
-            2 => Ok(Token::Word(binary_number as u16)),
+            2 => Ok(Token::Word(binary_number)),
             _ => Err(ParseError::InvalidNumberFormat)
         }
 

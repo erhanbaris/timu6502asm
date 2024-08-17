@@ -21,12 +21,13 @@ fn main() {
     info!("timu6502asm Compiler");
 
     let data = br#"
+    .include "src/tests/asms/tables.asm"
     .include "test2.asm"
     ADC TEST
     "#;
 
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "<MEMORY>".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -39,5 +40,5 @@ fn main() {
 
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
-    generator.dump(&context); 
+    //generator.dump(&context); 
 }

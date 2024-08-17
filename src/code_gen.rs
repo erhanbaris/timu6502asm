@@ -146,13 +146,13 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_branch(&mut self, target: &mut Vec<u8>, name: &String, _: BranchType) -> Result<(), CodeGeneratorError> {
-        self.branches.insert(name.clone(), target.len());
+    fn generate_branch(&mut self, target: &mut [u8], name: &str, _: BranchType) -> Result<(), CodeGeneratorError> {
+        self.branches.insert(name.to_owned(), target.len());
         //self.references.insert(name, ReferenceValue::AbsoluteAddress(0));
         Ok(())
     }
 
-    fn build_unresolved_branches(&mut self, target: &mut Vec<u8>) -> Result<(), CodeGeneratorError> {
+    fn build_unresolved_branches(&mut self, target: &mut [u8]) -> Result<(), CodeGeneratorError> {
         for (branch_name, position, _) in self.unresolved_branches.iter() {
             match self.branches.get(branch_name) {
                 Some(branch_position) => target[*position] = (*branch_position as i8 - *position as i8 - 1) as u8,
@@ -163,7 +163,7 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn build_unresolved_jumps(&mut self, target: &mut Vec<u8>) -> Result<(), CodeGeneratorError> {
+    fn build_unresolved_jumps(&mut self, target: &mut [u8]) -> Result<(), CodeGeneratorError> {
         for (branch_name, position, _) in self.unresolved_jumps.iter() {
             match self.branches.get(branch_name) {
                 Some(branch_position) => {
@@ -179,12 +179,12 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn directive_org(&mut self, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn directive_org(&mut self, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         self.start_point = values[0].get_word()?;
         Ok(())
     }
 
-    fn directive_incbin(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn directive_incbin(&mut self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         let file_path = match &values[0] {
             DirectiveValue::String(name) => name,
             _ => return Err(CodeGeneratorError::StringExpected)
@@ -202,22 +202,22 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn directive_byte(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn directive_byte(&mut self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         for value in values.iter() {
             match value {
                 DirectiveValue::Byte(byte) => target.push(*byte),
-                DirectiveValue::String(string) => string.as_bytes().into_iter().for_each(|byte| target.push(*byte)),
+                DirectiveValue::String(string) => string.as_bytes().iter().for_each(|byte| target.push(*byte)),
                 _ => return Err(CodeGeneratorError::ExpectedThis("byte or &String"))
             };
         }
         Ok(())
     }
 
-    fn directive_word(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn directive_word(&mut self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         for value in values.iter() {
             match value {
                 DirectiveValue::Byte(word) => {
-                    target.push(*word as u8);
+                    target.push(*word);
                     target.push(0x00);
                 },
                 DirectiveValue::Word(word) => {
@@ -230,14 +230,14 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn directive_ascii(&mut self, target: &mut Vec<u8>, values: &Vec<DirectiveValue>, add_null: bool) -> Result<(), CodeGeneratorError> {
-        for value in values.into_iter() {
+    fn directive_ascii(&mut self, target: &mut Vec<u8>, values: &[DirectiveValue], add_null: bool) -> Result<(), CodeGeneratorError> {
+        for value in values.iter() {
             let string = match value {
                 DirectiveValue::String(string) => string,
                 _ => return Err(CodeGeneratorError::ExpectedThis("string"))
             };
 
-            string.as_bytes().into_iter().for_each(|byte| target.push(*byte));
+            string.as_bytes().iter().for_each(|byte| target.push(*byte));
 
             let bytes = string.as_bytes();
             if add_null && bytes[bytes.len()-1] != 0x0 {
@@ -247,10 +247,10 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn directive_warning(&mut self, _: &mut Vec<u8>, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn directive_warning(&mut self, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         let mut message = String::new();
 
-        for value in values.into_iter() {
+        for value in values.iter() {
             match value {
                 DirectiveValue::String(string) => message += &string[..],
                 DirectiveValue::Word(word) => message += &format!("0x{:02X}", word),
@@ -263,7 +263,7 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, values: &Vec<DirectiveValue>) -> Result<(), CodeGeneratorError> {
+    fn generate_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         match option {
             DirectiveEnum::Org => self.directive_org(values)?,
             DirectiveEnum::Incbin => self.directive_incbin(target, values)?,
@@ -271,7 +271,7 @@ impl CodeGenerator {
             DirectiveEnum::Word => self.directive_word(target, values)?,
             DirectiveEnum::Ascii => self.directive_ascii(target, values, false)?,
             DirectiveEnum::Asciiz => self.directive_ascii(target, values, true)?,
-            DirectiveEnum::Warning => self.directive_warning(target, values)?,
+            DirectiveEnum::Warning => self.directive_warning(values)?,
             DirectiveEnum::Include => (),
         };
         Ok(())
@@ -291,7 +291,7 @@ impl CodeGenerator {
                 Some(Ast::InstrJump(position, branch)) => self.generate_instr_jump(&mut context.target, ast_index, *position, branch)?,
                 Some(Ast::Instr(position, number, mode)) => self.generate_instr(&mut context.target, *position, *number, *mode)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
-                Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, &values)?,
+                Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, values)?,
                 None => return Err(CodeGeneratorError::InternalError)
             };
         }

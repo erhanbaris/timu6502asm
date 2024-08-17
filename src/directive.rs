@@ -32,14 +32,6 @@ impl DirectiveValue {
             _ => Err(CodeGeneratorError::ExpectedThis("Word information"))
         }
     }
-
-    pub fn get_byte(&self) -> Result<u8, CodeGeneratorError> {
-        
-        match self {
-            DirectiveValue::Byte(number) => Ok(*number),
-            _ => Err(CodeGeneratorError::ExpectedThis("Byte information"))
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]

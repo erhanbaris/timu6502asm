@@ -60,7 +60,7 @@ BRK"#
 )]
 fn compile_test(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -203,7 +203,7 @@ LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 #[case(br#"JMP ($ffdd)"#, &[0x6c, 0xdd, 0xff])] // Only jump has indirect mode
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -224,7 +224,7 @@ fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
 #[case(br#".INCBIN "src/tests/bins/test1.bin""#, &[0x00, 0x01, 0x02, 0x03])]
 fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -249,7 +249,7 @@ fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
 #[case(br#"? :"#)]
 fn parser_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     assert!(parser.parse().is_err());
@@ -265,7 +265,7 @@ fn parser_fail(#[case] data: &'_ [u8]) {
 #[case(br#".fBNE  = "Hello""#)]
 fn ast_generator_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -280,7 +280,7 @@ fn ast_generator_fail(#[case] data: &'_ [u8]) {
 #[case(br#"AND ($ffdd)"#)]
 fn compile_failure(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -312,7 +312,7 @@ fn test_file(#[case] code_filename: &str, #[case] expected_filename: &str) {
     file.read_to_end(&mut binary).unwrap();
 
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
 
     let mut parser = Parser::new(0, &code, context);
     parser.parse().unwrap();

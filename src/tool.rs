@@ -31,10 +31,10 @@ pub fn print_error<T: Debug>(data: &'_ [u8], error: &T, line: usize, column: usi
         }
     }
 
-    println!("");
+    println!();
     error!("{:?}", &error);
     error!("Line: {}, column: {}", line + 1, column);
     error!("{}", str::from_utf8(&data[start_index..end_index]).unwrap());
     error!("{}{}", (0..column).map(|_| " ").collect::<String>(), (0..end-column).map(|_| "^").collect::<String>());
-    println!("");
+    println!();
 }

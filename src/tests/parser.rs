@@ -15,7 +15,7 @@ use crate::{ast::AstGenerator, context::Context, parser::{Parser, Token}};
 #[case(b"160", 0xa0)]
 fn number_check(#[case] data: &'_ [u8], #[case] expected: u16) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
   
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -51,16 +51,13 @@ fn number_check(#[case] data: &'_ [u8], #[case] expected: u16) {
 #[case(b"$a000)")]
 fn invalid_number_check(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
   
     let mut parser = Parser::new(0, data, context);
 
-    match parser.parse() {
-        Ok(_) => {
-            let ast_generator = AstGenerator::new();
-            ast_generator.generate(parser.context).unwrap_err();
-        },
-        Err(_) => ()
+    if let Ok(_) = parser.parse() {
+        let ast_generator = AstGenerator::new();
+        ast_generator.generate(parser.context).unwrap_err();
     }
 }
 
@@ -72,7 +69,7 @@ fn invalid_number_check(#[case] data: &'_ [u8]) {
 #[case(b";;;;;;;;;;;;;")]
 fn check_comment(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file("main.asm".to_string());
+    context.add_file(0, "main.asm".to_string());
   
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
