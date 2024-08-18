@@ -50,7 +50,7 @@ timu6502asm --help
 If the compilation operation failed, process exit code will be **1**.
 
 ## Data types
-Compiler works with primative date types. 
+Compiler works with primative data types.
 
 ### Byte
 It takes up one byte of space. It is written in three different ways depending on the number type.
