@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, io::Read, path::PathBuf};
 
 use rstest::*;
 
@@ -60,7 +60,9 @@ BRK"#
 )]
 fn compile_test(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -203,7 +205,9 @@ LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 #[case(br#"JMP ($ffdd)"#, &[0x6c, 0xdd, 0xff])] // Only jump has indirect mode
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -224,7 +228,9 @@ fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
 #[case(br#".INCBIN "src/tests/bins/test1.bin""#, &[0x00, 0x01, 0x02, 0x03])]
 fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+        let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -249,7 +255,9 @@ fn binary_read(#[case] data: &'_ [u8], #[case] binary: &'_ [u8]) {
 #[case(br#"? :"#)]
 fn parser_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+        let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     assert!(parser.parse().is_err());
@@ -265,7 +273,9 @@ fn parser_fail(#[case] data: &'_ [u8]) {
 #[case(br#".fBNE  = "Hello""#)]
 fn ast_generator_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+        let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -280,7 +290,9 @@ fn ast_generator_fail(#[case] data: &'_ [u8]) {
 #[case(br#"AND ($ffdd)"#)]
 fn compile_failure(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+        let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
 
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -302,6 +314,7 @@ fn compile_failure(#[case] data: &'_ [u8]) {
 
 #[rstest]
 #[case("src/tests/asms/tables.asm", "src/tests/bins/tables.bin")]
+#[case("src/tests/asms/import-test.asm", "src/tests/bins/import-test.bin")]
 fn test_file(#[case] code_filename: &str, #[case] expected_filename: &str) {
     let mut code = Vec::new();
     let mut file = File::open(code_filename).unwrap();
@@ -312,7 +325,9 @@ fn test_file(#[case] code_filename: &str, #[case] expected_filename: &str) {
     file.read_to_end(&mut binary).unwrap();
 
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from(code_filename);
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = code.clone();
 
     let mut parser = Parser::new(0, &code, context);
     parser.parse().unwrap();
@@ -325,4 +340,28 @@ fn test_file(#[case] code_filename: &str, #[case] expected_filename: &str) {
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
     assert_eq!(context.target, binary);
+}
+
+#[rstest]
+#[case("src/tests/asms/fail-test.asm")]
+fn fail_test(#[case] code_filename: &str) {
+    let mut code = Vec::new();
+    let mut file = File::open(code_filename).unwrap();
+    file.read_to_end(&mut code).unwrap();
+
+    let context = Context::default();
+    let path = PathBuf::from(code_filename);
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = code.clone();
+
+    let mut parser = Parser::new(0, &code, context);
+    parser.parse().unwrap();
+
+    let context = parser.context;
+
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    assert!(generator.generate(context).is_err());
 }

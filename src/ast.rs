@@ -1,6 +1,10 @@
-use std::{cell::{Cell, RefCell}, fs::File, io::Read};
+use std::{cell::{Cell, RefCell}, fs::File, io::Read, path::PathBuf};
 
-use log::info;
+#[cfg(not(test))] 
+use log::{info, warn}; // Use log crate when building application
+ 
+#[cfg(test)]
+use std::{println as info, println as warn}; // Workaround to use prinltn! for logs.
 use thiserror::Error;
 
 use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenType}, tool::print_error};
@@ -297,23 +301,28 @@ impl AstGenerator {
 
     fn process_include(&self, context: &Context, token_index: usize) -> Result<(), AstGeneratorError> {
         let include_asm = self.include_asm.replace(None);
+        let mut file_path = PathBuf::new();
 
         if let Some(item) = include_asm {
-            let file_path = match item {
-                DirectiveValue::String(name) => name,
+            match item {
+                DirectiveValue::String(name) => file_path.push(name),
                 _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Path expected as a string".to_string()))
             };
     
             let mut tokens = context.tokens.borrow_mut();
             let token = &tokens[token_index];
-            let path = context.add_file(token.file_id, file_path.to_string());
+            let path = context.add_file(token.file_id, file_path);
     
-            info!("Importing {:?}", &path.as_os_str());
+            if !context.silent {
+                info!("Importing {:?}", &path.as_os_str());
+            }
+
             let mut file = File::open(&path)?;
     
     
             let mut code = Vec::new();
             file.read_to_end(&mut code)?;
+            context.code_files.borrow_mut()[context.last_file_id()].data = code.clone();
 
             code.push(b'\n'); // Add new lines to end of the code file
     
@@ -458,13 +467,14 @@ impl AstGenerator {
             // Branch inst
             self.eat_space(context)?;
             let text = self.eat_text(context)?;
-            context.add_ast(token_index,Ast::InstrBranch(positon, text));
+            context.add_ast(token_index, Ast::InstrBranch(positon, text));
         }
 
         else if JUMP_INSTS.contains(&positon) {
             // Jump inst
             self.eat_space(context)?;
             let index = self.index.get();
+
             if let Ok((number, mode)) = self.try_parse_number(context) {
                 context.add_ast(token_index, Ast::Instr(positon, number, mode));
                 return Ok(())
@@ -534,7 +544,11 @@ impl AstGenerator {
             Err(error) => {
                 let tokens = context.tokens.borrow();
                 let token = &tokens[self.index.get() - 1];
-                print_error(&context.target, &error, token.line, token.column, token.end);
+
+                if !context.silent {
+                    let code_file = &context.code_files.borrow()[token.file_id];
+                    print_error(&code_file.data, &error, token.line, token.column, token.end);
+                }
                 Err(error)
             }
         }

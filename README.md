@@ -33,6 +33,22 @@ Expected output:
 0610: fb 60 00
 ```
 
+## Building
+timu6502 builded with latest Rust Language. You have to install Rust Language. After installetion execute ```cargo build --release``` command. The executable will be located under _target/release/_ folder.
+Compiler tested under Windows and MacOS operating system. It should work under Linux OS but not yet tested.
+
+
+## Usage
+timu6502 is terminal based compiler and there is no UI yet available. So, basic usage is:
+```bash
+timu6502asm test.asm --target test.bin
+timu6502asm test.asm --binary-dump
+timu6502asm test.asm --token-dump
+timu6502asm test.asm --token-dump --slient
+timu6502asm --help
+```
+If the compilation operation failed, process exit code will be **1**.
+
 ## Data types
 Compiler works with primative date types. 
 
@@ -75,7 +91,7 @@ It takes up different sizes of space depending on the definition. The text must 
 ### .org
 Change reference locations. It is not changing where the codes are stored, it is changing jump and branch references.
 ```assembly
-.ORG $0600
+.org $0600
 .byte $11
 ```
 ```
@@ -136,31 +152,46 @@ Include a file as binary data.
 ### .warning
 Print warning message on compilation time.
 ```assembly
-.warning "timu6502asm compiler works partial"
+.warning "timu6502asm compiler works"
 ```
 ```
-22:05:16 [WARN] timu6502asm compiler works partial
+22:05:16 [WARN] timu6502asm compiler works
+```
+
+### .fail
+The compilation process stops with an error message.
+```assembly
+.fail "Unsupported platform"
 ```
 
 ### .include
-Import another file.
+Import another assembly file. All variable defitions will be imported and could be accessible from other files.
 ```assembly
 .include "header.asm"
 .include "body.asm"
 .include "footer.asm"
 ```
+
+### .pad
+Fill memory from the current address to a specified address.  A fill value may also be specified.
+```assembly
+.pad $0600
 ```
-22:05:16 [WARN] timu6502asm compiler works partial
+
+### .fillvalue
+Change the default filler for **.pad**.
+```assembly
+.fillvalue $ff
 ```
 
 There are many things to do. Here are the some todos:
- - [ ] Case insensitivity
- - [ ] Rom file generation
+ - [X] Case insensitivity
+ - [X] Binary file generation
  - [ ] Decompiler
- - [ ] Human friendly prints
+ - [X] Human friendly prints
  - [X] Import different asm files
  - [ ] Performance measurement
  - [ ] Documentation
- - [ ] Deploy on real hardware
+ - [ ] Deploy on real hardware/emulator
  - [ ] (stretch goal) Basic high-level programming language
  - [ ] (stretch goal) Basic emulator

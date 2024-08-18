@@ -2,7 +2,11 @@ use std::{collections::HashMap, str::Utf8Error};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
-use log::{info, warn};
+#[cfg(not(test))] 
+use log::{info, warn}; // Use log crate when building application
+ 
+#[cfg(test)]
+use std::{println as info, println as warn}; // Workaround to use prinltn! for logs.
 use thiserror::Error;
 
 use crate::context::Context;
@@ -28,15 +32,19 @@ pub enum CodeGeneratorError {
     #[error("Text convertion issue ({0})")]
     Utf8Error(#[from] Utf8Error),    
     #[error("Expected {0}")]
-    ExpectedThis(&'static str)
+    ExpectedThis(&'static str),
+    #[error("{0}")]
+    ProgramFailed(String)
 }
 
 #[derive(Debug)]
 pub struct CodeGenerator {
     pub index: usize,
     pub size: usize,
+    pub silent: bool,
 
     pub start_point: u16,
+    pub fillvalue : u8,
     pub branches: HashMap<String, usize>,
     pub unresolved_branches: Vec<(String, usize, usize)>,
     pub unresolved_jumps: Vec<(String, usize, usize)>
@@ -47,7 +55,9 @@ impl CodeGenerator {
         Self {
             index: 0,
             size: 0,
+            silent: false,
             start_point: Default::default(),
+            fillvalue: 0x00,
             branches: Default::default(),
             unresolved_branches: Default::default(),
             unresolved_jumps: Default::default(),
@@ -258,8 +268,42 @@ impl CodeGenerator {
                 _ => return Err(CodeGeneratorError::ExpectedThis("string"))
             };
         }
+        
+        if !self.silent {
+            warn!("{}", message);
+        }
+        Ok(())
+    }
 
-        warn!("{}", message);
+    fn directive_fail(&mut self, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
+        let mut message = String::new();
+
+        for value in values.iter() {
+            match value {
+                DirectiveValue::String(string) => message += &string[..],
+                DirectiveValue::Word(word) => message += &format!("0x{:02X}", word),
+                DirectiveValue::Byte(byte) => message += &format!("0x{:02X}", byte),
+                _ => return Err(CodeGeneratorError::ExpectedThis("string"))
+            };
+        }
+        Err(CodeGeneratorError::ProgramFailed(message))
+    }
+
+    fn directive_pad(&mut self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
+        let address = match &values[0] {
+            DirectiveValue::Word(address) => *address,
+            _ => return Err(CodeGeneratorError::ExpectedThis("word"))
+        };
+
+        for _ in 0..(address as usize-target.len()) {
+            target.push(self.fillvalue);
+        }
+
+        Ok(())
+    }
+
+    fn directive_fillvalue(&mut self, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
+        self.fillvalue = values[0].get_byte()?;
         Ok(())
     }
 
@@ -272,7 +316,10 @@ impl CodeGenerator {
             DirectiveEnum::Ascii => self.directive_ascii(target, values, false)?,
             DirectiveEnum::Asciiz => self.directive_ascii(target, values, true)?,
             DirectiveEnum::Warning => self.directive_warning(values)?,
+            DirectiveEnum::Fail => self.directive_fail(values)?,
             DirectiveEnum::Include => (),
+            DirectiveEnum::Pad => self.directive_pad(target, values)?,
+            DirectiveEnum::Fillvalue => self.directive_fillvalue(values)?,
         };
         Ok(())
     }
@@ -309,7 +356,10 @@ impl CodeGenerator {
             Err(error) => {
                 let asts = context.asts.borrow();
                 let ast = &asts[self.index - 1];
-                print_error(&context.target, &error, ast.line, ast.column, ast.end);
+                if !context.silent {
+                    let code_file = &context.code_files.borrow()[0];
+                    print_error(&code_file.data, &error, ast.line, ast.column, ast.end);
+                }
                 Err(error)
             }
         }

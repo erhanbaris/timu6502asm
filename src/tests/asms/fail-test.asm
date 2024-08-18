@@ -1,0 +1,1 @@
+.fail "Fail test"

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use rstest::*;
 
 use crate::{ast::AstGenerator, context::Context, parser::{Parser, Token}};
@@ -15,7 +17,8 @@ use crate::{ast::AstGenerator, context::Context, parser::{Parser, Token}};
 #[case(b"160", 0xa0)]
 fn number_check(#[case] data: &'_ [u8], #[case] expected: u16) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
   
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();
@@ -51,7 +54,9 @@ fn number_check(#[case] data: &'_ [u8], #[case] expected: u16) {
 #[case(b"$a000)")]
 fn invalid_number_check(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
   
     let mut parser = Parser::new(0, data, context);
 
@@ -69,7 +74,8 @@ fn invalid_number_check(#[case] data: &'_ [u8]) {
 #[case(b";;;;;;;;;;;;;")]
 fn check_comment(#[case] data: &'_ [u8]) {
     let context = Context::default();
-    context.add_file(0, "main.asm".to_string());
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
   
     let mut parser = Parser::new(0, data, context);
     parser.parse().unwrap();

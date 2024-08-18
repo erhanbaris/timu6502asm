@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, default, path::PathBuf};
 
 use crate::{ast::{Ast, AstInfo}, directive::DirectiveValue, parser::TokenInfo};
 
@@ -9,7 +9,16 @@ pub struct Context {
     pub asts: RefCell<Vec<AstInfo>>,
     pub references: RefCell<HashMap<String, Vec<DirectiveValue>>>,
     pub files: RefCell<Vec<PathBuf>>,
-    pub work_directory: PathBuf
+    pub work_directory: PathBuf,
+    pub silent: bool,
+    pub code_files: RefCell<Vec<CodeFile>>
+}
+
+#[derive(Debug)]
+pub struct CodeFile {
+    pub path: PathBuf,
+    pub includes: Vec<PathBuf>,
+    pub data: Vec<u8>
 }
 
 impl Context {
@@ -26,8 +35,9 @@ impl Context {
         self.asts.borrow_mut().push(info);
     }
 
-    pub fn add_file(&self, base_file_id: usize, file: String) -> PathBuf {
+    pub fn add_file(&self, base_file_id: usize, file: PathBuf) -> PathBuf {
         let mut files = self.files.borrow_mut();
+        let mut code_files = self.code_files.borrow_mut();
         
         let path = match files.get(base_file_id) {
             Some(path) => path.parent().map(|parent| parent.to_owned()),
@@ -40,6 +50,7 @@ impl Context {
         };
 
         files.push(full_file_path.clone());
+        code_files.push(CodeFile { path: full_file_path.clone(), includes: Vec::new(), data: Vec::new() });
         full_file_path
     }
 
@@ -79,7 +90,9 @@ impl Default for Context {
             tokens: Default::default(),
             asts: Default::default(),
             references: Default::default(),
-            files: Default::default()
+            files: Default::default(),
+            silent: false,
+            code_files: Default::default()
         }
     }
 }

@@ -152,7 +152,10 @@ impl<'a> Parser<'a> {
         match self.inner_parse() {
             Ok(_) => Ok(()),
             Err(error) => {
-                print_error(self.data, &error, self.line, self.column, self.end);
+                if !self.context.silent {
+                    print_error(self.data, &error, self.line, self.column, self.end);
+                }
+
                 Err(error)
             }
         }
