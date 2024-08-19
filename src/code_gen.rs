@@ -107,7 +107,7 @@ impl CodeGenerator {
             InstrValue::Word(word) => (*word, ModeType::Absolute),
             InstrValue::Reference(reference) => match self.branches.get(reference) {
                 Some(branch_position) => {
-                    let distance_position = *branch_position as i8 - (target.len() + 2) as i8;
+                    let distance_position = *branch_position as i8;
                     (distance_position as u16, ModeType::Absolute)
                 },
                 None => {
@@ -159,9 +159,6 @@ impl CodeGenerator {
                 break;
             }
         }
-
-        println!("modes: {:?}", &modes);
-        println!("target: {:?}", &target);
 
         if !found {
             return Err(CodeGeneratorError::IllegalOpcode)
