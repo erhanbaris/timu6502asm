@@ -10,3 +10,5 @@
 
 .fillvalue $22
 .pad $0060
+
+.warning "test warning"

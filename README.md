@@ -5,10 +5,27 @@
 
 Yet another 6502 Asm compiler project. The goal is make a multi platform (include web) compiler generator. Project is still in very early stage and there is no easy way to use it. You can check the code or wait to get more usable version.
 
-Example code what compiler can compile now.
-```assembly
-.ORG $0600 ; change location
+## Building
+timu6502 builded with latest Rust Language. You have to install Rust Language. After installetion execute ```cargo build --release``` command. The executable will be located under _target/release/_ folder.
+Compiler tested under Windows and MacOS operating system. It should work under Linux OS but not yet tested.
 
+
+## Usage
+timu6502 is terminal based compiler. So, basic usage is:
+```bash
+timu6502asm test.asm --target test.bin
+timu6502asm test.asm --binary-dump
+timu6502asm test.asm --token-dump
+timu6502asm test.asm --token-dump --slient
+timu6502asm --help
+```
+If the compilation operation failed, process exit code will be **1** and print error descriptions if silent mode is off.
+
+## Branches
+Basically, branches is referencing the location at the execution code. If you want to jump location, it is hard to calculate and remember the address, but, with branches you just need to remember branch name and the compiler will be assign address automatically.
+
+Example:
+```assembly
 JSR init
 JSR loop
 JSR end
@@ -26,28 +43,59 @@ loop:
 end:
     BRK
 ```
+As you can see in the example there are **init**, **loop** and **end** branches defined and used with the instruction code.
 
-Expected output:
+Also, compiler has a support for local branches.
+```assembly
+branch1:
+    @local1:
+        INX
+
+    @local2:
+        INY
+    jump @local1
+
+branch2:
+    @local1:
+        DEX
+
+    @local2:
+        DEY
+    jump @local1
 ```
-0600: 20 09 06 20 0c 06 20 12 06 a2 00 60 e8 e0 05 d0
-0610: fb 60 00
+
+As you can see in the example there are **init**, **loop** and **end** branches defined and used with the instruction code.
+
+Also, compiler has a support for local branches.
+```assembly
+branch1:
+    @local1:
+        INX
+
+    @local2:
+        INY
+    jump @local1
+
+branch2:
+    @local1:
+        DEX
+
+    @local2:
+        DEY
+    jump @local1
 ```
 
-## Building
-timu6502 builded with latest Rust Language. You have to install Rust Language. After installetion execute ```cargo build --release``` command. The executable will be located under _target/release/_ folder.
-Compiler tested under Windows and MacOS operating system. It should work under Linux OS but not yet tested.
+## Variable
+You can define static variable and use it with instruction.
 
+Example:
+```assembly
+var1 = $10
+var2 = 22
+var3 = %11001100
 
-## Usage
-timu6502 is terminal based compiler. So, basic usage is:
-```bash
-timu6502asm test.asm --target test.bin
-timu6502asm test.asm --binary-dump
-timu6502asm test.asm --token-dump
-timu6502asm test.asm --token-dump --slient
-timu6502asm --help
+CPX #var1
 ```
-If the compilation operation failed, process exit code will be **1** and print error descriptions if silent mode is off.
 
 ## Data types
 Compiler works with primative data types.

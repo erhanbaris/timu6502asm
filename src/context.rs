@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, default, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf};
 
 use crate::{ast::{Ast, AstInfo}, directive::DirectiveValue, parser::TokenInfo};
 
@@ -56,23 +56,6 @@ impl Context {
 
     pub fn last_file_id(&self) -> usize {
         self.files.borrow().len() - 1
-    }
-
-    pub fn last_path(&self) -> Option<String> {
-        match self.files.borrow().last() {
-            Some(path) => match path.parent() {
-                Some(parent) => parent.as_os_str().to_str().map(|path| path.to_string()),
-                None => None
-            },
-            None => self.work_directory.as_os_str().to_str().map(|path| path.to_string())
-        }
-    }
-
-    pub fn get_path(&self, file_id: usize) -> Option<PathBuf> {
-        match self.files.borrow().get(file_id) {
-            Some(path) => path.parent().map(|parent| parent.to_owned()),
-            None => None
-        }
     }
 }
 

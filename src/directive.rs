@@ -14,7 +14,9 @@ pub enum DirectiveEnum {
     Fail,
     Include,
     Pad,
-    Fillvalue
+    Fillvalue,
+    Dsb,
+    Dsw
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -74,4 +76,6 @@ pub const SYSTEM_DIRECTIVES: &[DirectiveInfo] = &[
     DirectiveInfo { name: "INCLUDE",   directive: DirectiveEnum::Include,   size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::String] },
     DirectiveInfo { name: "PAD",       directive: DirectiveEnum::Pad,       size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::Word] },
     DirectiveInfo { name: "FILLVALUE", directive: DirectiveEnum::Fillvalue, size: DirectiveVariableSize::Length(1),   values: &[DirectiveType::Byte] },
+    DirectiveInfo { name: "DSB",       directive: DirectiveEnum::Dsb,       size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::Word] },
+    DirectiveInfo { name: "DSW",       directive: DirectiveEnum::Dsw,       size: DirectiveVariableSize::Min(1),      values: &[DirectiveType::Byte, DirectiveType::Word] },
 ];

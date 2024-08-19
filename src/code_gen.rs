@@ -11,11 +11,14 @@ use thiserror::Error;
 
 use crate::ast::{InstrInfo, InstrValue, InstrInfoRegister};
 use crate::context::Context;
+use crate::opcode::BRANCH_INSTS;
 use crate::tool::print_error;
 use crate::{ast::{Ast, BranchType}, opcode::{ModeType, MODES}, directive::{DirectiveEnum, DirectiveValue}};
 
 #[derive(Error, Debug)]
 pub enum CodeGeneratorError {
+    #[error("Unsupported directive value")]
+    UnsupportedDirectiveValue,
     #[error("Internal error")]
     InternalError,
     #[error("Illegal opcode")]
@@ -48,8 +51,8 @@ pub struct CodeGenerator {
     pub fillvalue : u8,
     pub branches: HashMap<String, usize>,
     pub local_branches: HashMap<String, usize>,
-    pub unresolved_branches: Vec<(String, usize, usize)>,
-    pub unresolved_jumps: Vec<(String, usize, usize)>,
+    pub unresolved_relative_jump: Vec<(String, usize, usize)>,
+    pub unresolved_absolute_jumps: Vec<(String, usize, usize)>,
     pub unresolved_local_branches: Vec<(String, usize, usize)>
 }
 
@@ -64,8 +67,8 @@ impl CodeGenerator {
             branches: Default::default(),
             local_branches: Default::default(),
             unresolved_local_branches: Default::default(),
-            unresolved_branches: Default::default(),
-            unresolved_jumps: Default::default(),
+            unresolved_relative_jump: Default::default(),
+            unresolved_absolute_jumps: Default::default(),
         }
     }
 
@@ -98,32 +101,41 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn build_relative_jump(target: &mut [u8], ast_index: usize, reference: &String, branches: &mut HashMap<String, usize>, unresolved_jump: &mut Vec<(String, usize, usize)>) -> (u16, ModeType) {
+        match branches.get(reference) {
+            Some(branch_position) => ((*branch_position as i16 - (target.len() + 2) as i16) as u16, ModeType::Relative),
+            None => {
+                unresolved_jump.push((reference.clone(), target.len() + 1, ast_index));
+                (0, ModeType::Relative)
+            }
+        }
+    }
+
+    fn build_absolute_jump(target: &mut [u8], ast_index: usize, reference: &String, branches: &mut HashMap<String, usize>, unresolved_jump: &mut Vec<(String, usize, usize)>) -> (u16, ModeType) {
+        match branches.get(reference) {
+            Some(branch_position) => (*branch_position as u16, ModeType::Absolute),
+            None => {
+                unresolved_jump.push((reference.clone(), target.len() + 1, ast_index));
+                (0, ModeType::Absolute)
+            }
+        }
+    }
+
     fn generate_instr(&mut self, target: &mut Vec<u8>, ast_index: usize, instr: usize, value: &InstrInfo) -> Result<(), CodeGeneratorError> {
         let modes = MODES[instr];
         let mut found = false;
+        let relative_jump = BRANCH_INSTS.contains(&instr);
 
         let (number, mut possible_mode) = match &value.value {
             InstrValue::Byte(byte) => (*byte as u16, ModeType::ZeroPage),
             InstrValue::Word(word) => (*word, ModeType::Absolute),
-            InstrValue::Reference(reference) => match self.branches.get(reference) {
-                Some(branch_position) => {
-                    let distance_position = *branch_position as i8;
-                    (distance_position as u16, ModeType::Absolute)
-                },
-                None => {
-                    self.unresolved_jumps.push((reference.clone(), target.len() + 1, ast_index));
-                    (0, ModeType::Absolute)
-                }
+            InstrValue::Reference(reference) => match relative_jump {
+                true => Self::build_relative_jump(target, ast_index, reference, &mut self.branches, &mut self.unresolved_relative_jump),
+                false => Self::build_absolute_jump(target, ast_index, reference, &mut self.branches, &mut self.unresolved_absolute_jumps),
             },
-            InstrValue::LocalReference(reference) => match self.local_branches.get(reference) {
-                Some(branch_position) => {
-                    let distance_position = *branch_position as i8 - (target.len() + 2) as i8;
-                    (distance_position as u16, ModeType::Absolute)
-                },
-                None => {
-                    self.unresolved_local_branches.push((reference.clone(), target.len() + 1, ast_index));
-                    (0, ModeType::Absolute)
-                }
+            InstrValue::LocalReference(reference) => match relative_jump {
+                true => Self::build_relative_jump(target, ast_index, reference, &mut self.local_branches, &mut self.unresolved_local_branches),
+                false => Self::build_absolute_jump(target, ast_index, reference, &mut self.local_branches, &mut self.unresolved_local_branches),
             }
         };
 
@@ -151,6 +163,10 @@ impl CodeGenerator {
             possible_mode = ModeType::Immediate;
         }
 
+        if BRANCH_INSTS.contains(&instr) {
+            possible_mode = ModeType::Relative;
+        }
+
         for search_mode in modes.iter() {
             if search_mode.mode == possible_mode {
                 target.push(search_mode.opcode);
@@ -163,40 +179,6 @@ impl CodeGenerator {
         if !found {
             return Err(CodeGeneratorError::IllegalOpcode)
         }
-        Ok(())
-    }
-
-    fn generate_instr_branch(&mut self, target: &mut Vec<u8>, ast_index: usize, position: usize, branch_name: &String) -> Result<(), CodeGeneratorError> {
-        let branch_position = match self.branches.get(branch_name) {
-            Some(branch_position) => {
-                let distance_position = *branch_position as i8 - (target.len() + 2) as i8;
-                distance_position as u16
-            },
-            None => {
-                self.unresolved_branches.push((branch_name.clone(), target.len() + 1, ast_index));
-                0
-            }
-        };
-
-        let modes = MODES[position];
-        target.push(modes[0].opcode);
-        self.push_number(target, branch_position, ModeType::Relative)?;
-
-        Ok(())
-    }
-
-    fn generate_instr_jump(&mut self, target: &mut Vec<u8>, ast_index: usize, position: usize, branch_name: &String) -> Result<(), CodeGeneratorError> {
-        let jump_position = match self.branches.get(branch_name) {
-            Some(jump_position) => self.start_point + *jump_position as u16,
-            None => {
-                self.unresolved_jumps.push((branch_name.clone(), target.len() + 1, ast_index));
-                0
-            }
-        };
-
-        let modes = MODES[position];
-        target.push(modes[0].opcode);
-        self.push_number(target, jump_position, ModeType::Absolute)?;
         Ok(())
     }
 
@@ -225,8 +207,8 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn build_unresolved_branches(&mut self, target: &mut [u8]) -> Result<(), CodeGeneratorError> {
-        for (branch_name, position, _) in self.unresolved_branches.iter() {
+    fn build_unresolved_relative_jump(&mut self, target: &mut [u8]) -> Result<(), CodeGeneratorError> {
+        for (branch_name, position, _) in self.unresolved_relative_jump.iter() {
             match self.branches.get(branch_name) {
                 Some(branch_position) => target[*position] = (*branch_position as i8 - *position as i8 - 1) as u8,
                 None => return Err(CodeGeneratorError::UnresolvedBranches)
@@ -247,7 +229,7 @@ impl CodeGenerator {
     }
 
     fn build_unresolved_jumps(&mut self, target: &mut [u8]) -> Result<(), CodeGeneratorError> {
-        for (branch_name, position, _) in self.unresolved_jumps.iter() {
+        for (branch_name, position, _) in self.unresolved_absolute_jumps.iter() {
             match self.branches.get(branch_name) {
                 Some(branch_position) => {
                     let jump_position = self.start_point + *branch_position as u16;
@@ -380,6 +362,49 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn directive_define_storage_byte(&self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
+        let mut filler = 0x00;
+        let times = match &values[0] {
+            DirectiveValue::Byte(byte) => *byte,
+            DirectiveValue::Word(word) => *word as u8,
+            _ => return Err(CodeGeneratorError::UnsupportedDirectiveValue)
+        };
+
+        if values.len() > 1 {
+            if let Ok(new_filler) = values[1].get_byte() {
+                filler = new_filler;
+            }
+        }
+
+        for _ in 0..times {
+            target.push(filler);
+        }
+
+        Ok(())
+    }
+
+    fn directive_define_storage_word(&self, target: &mut Vec<u8>, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
+        let mut filler: u16 = 0x00;
+        let times = match &values[0] {
+            DirectiveValue::Byte(byte) => *byte as u16,
+            DirectiveValue::Word(word) => *word,
+            _ => return Err(CodeGeneratorError::UnsupportedDirectiveValue)
+        };
+
+        if values.len() > 1 {
+            if let Ok(new_filler) = values[1].get_word() {
+                filler = new_filler;
+            }
+        }
+
+        for _ in 0..times {
+            target.push(filler as u8);
+            target.push((filler >> 8) as u8);
+        }
+
+        Ok(())
+    }
+
     fn generate_directive(&mut self, target: &mut Vec<u8>, option: DirectiveEnum, values: &[DirectiveValue]) -> Result<(), CodeGeneratorError> {
         match option {
             DirectiveEnum::Org => self.directive_org(values)?,
@@ -393,6 +418,8 @@ impl CodeGenerator {
             DirectiveEnum::Include => (),
             DirectiveEnum::Pad => self.directive_pad(target, values)?,
             DirectiveEnum::Fillvalue => self.directive_fillvalue(values)?,
+            DirectiveEnum::Dsb => self.directive_define_storage_byte(target, values)?,
+            DirectiveEnum::Dsw => self.directive_define_storage_word(target, values)?,
         };
         Ok(())
     }
@@ -407,8 +434,6 @@ impl CodeGenerator {
 
             match ast {
                 Some(Ast::InstrImplied(position)) => self.generate_implied(&mut context.target, *position)?,
-                Some(Ast::InstrBranch(position, branch)) => self.generate_instr_branch(&mut context.target, ast_index, *position, branch)?,
-                Some(Ast::InstrJump(position, branch)) => self.generate_instr_jump(&mut context.target, ast_index, *position, branch)?,
                 Some(Ast::Instr(position, value)) => self.generate_instr(&mut context.target, ast_index, *position, value)?,
                 Some(Ast::Branch(name, branch_type)) => self.generate_branch(&mut context.target, name, *branch_type)?,
                 Some(Ast::Directive(option, values)) => self.generate_directive(&mut context.target, *option, values)?,
@@ -416,7 +441,7 @@ impl CodeGenerator {
             };
         }
 
-        self.build_unresolved_branches(&mut context.target)?;
+        self.build_unresolved_relative_jump(&mut context.target)?;
         self.build_unresolved_jumps(&mut context.target)?;
         Ok(())
     }

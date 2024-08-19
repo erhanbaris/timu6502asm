@@ -7,7 +7,7 @@ use log::{info, warn}; // Use log crate when building application
 use std::{println as info, println as warn}; // Workaround to use prinltn! for logs.
 use thiserror::Error;
 
-use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenType}, tool::print_error};
+use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{BRANCH_INSTS, INSTS_SIZE}, parser::{Parser, Token, TokenType}, tool::print_error};
 
 #[derive(Debug, PartialEq)]
 pub enum InstrValue {
@@ -41,8 +41,6 @@ pub enum BranchType {
 #[derive(Debug)]
 pub enum Ast {
     InstrImplied(usize),
-    InstrBranch(usize, String),
-    InstrJump(usize, String),
     Instr(usize, InstrInfo),
     Branch(String, BranchType),
     Directive(DirectiveEnum, Vec<DirectiveValue>)
@@ -74,6 +72,9 @@ pub enum AstGeneratorError {
 
     #[error("IO Error ({0})")]
     IOError(#[from] std::io::Error),
+
+    #[error("'{0}' reference already defined)")]
+    ReferenceAlreadyDefined(String)
 }
 
 impl AstGeneratorError {
@@ -319,7 +320,11 @@ impl AstGenerator {
         self.cleanup_space(context)?;
 
         let values = self.parse_list(context, |_| true)?;
-        context.references.borrow_mut().insert(name.to_owned(), values);
+        let has_reference = context.references.borrow_mut().insert(name.to_owned(), values).is_some();
+
+        if has_reference {
+            return Err(AstGeneratorError::ReferenceAlreadyDefined(name.to_owned()));
+        }
         Ok(())
     }
 
@@ -373,6 +378,7 @@ impl AstGenerator {
                     inst_info.value = InstrValue::Reference(keyword.to_owned());
                 }
             },
+            Token::LocalKeyword(keyword) => inst_info.value = InstrValue::LocalReference(keyword.to_owned()),
             Token::Byte(byte) =>  inst_info.value = InstrValue::Byte(*byte),
             Token::Word(word) => inst_info.value = InstrValue::Word(*word),
             _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()))
@@ -445,30 +451,14 @@ impl AstGenerator {
         else if BRANCH_INSTS.contains(&positon) {
             // Branch inst
             self.eat_space(context)?;
-            let text = self.eat_text(context)?;
-            context.add_ast(token_index, Ast::InstrBranch(positon, text));
-        }
+            let value = self.parse_instr_value(context)?;
 
-        else if JUMP_INSTS.contains(&positon) {
-            // Jump inst
-            self.eat_space(context)?;
-            let index = self.index.get();
-
-            if let Ok(value) = self.parse_instr_value(context) {
-                context.add_ast(token_index, Ast::Instr(positon, value));
-                return Ok(())
+            match value.value {
+                InstrValue::Byte(_) => context.add_ast(token_index, Ast::Instr(positon, value)),
+                InstrValue::Reference(_) => context.add_ast(token_index, Ast::Instr(positon, value)),
+                InstrValue::LocalReference(_) => context.add_ast(token_index, Ast::Instr(positon, value)),
+                _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Relative number or branch name expected".to_string()))
             }
-
-            self.index.set(index); // Restore index
-
-            let token_index= self.eat()?;
-            let token = &context.tokens.borrow()[token_index];
-            if let Token::Keyword(name) = &token.token {
-                context.add_ast(token_index, Ast::InstrJump(positon, name.clone()));
-                return Ok(())
-            }
-
-            return Err(AstGeneratorError::syntax_issue(context, token_index, "Branch name, absolute address or indirect address expected".to_string()))
         }
 
         else {

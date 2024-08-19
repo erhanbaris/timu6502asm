@@ -425,7 +425,7 @@ impl<'a> Parser<'a> {
             return Ok(Token::LocalBranch(str::from_utf8(&self.data[start..self.index-1])?.to_string()))
         }
 
-        return Ok(Token::LocalKeyword(str::from_utf8(&self.data[start..self.index])?.to_string()));
+        Ok(Token::LocalKeyword(str::from_utf8(&self.data[start..self.index])?.to_string()))
     }
 
     fn parse_string(&mut self) -> Result<Token, ParseError> {

@@ -11,7 +11,9 @@ use crate::{
 
 #[rstest]
 #[case(
-    br#"LDX #$08
+    br#"
+VAR = "\""    
+LDX #$08
 decrement2:
 STX $0201
 decrement:
@@ -236,6 +238,26 @@ LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 #[case(br#"AND $ffdd , x"#, &[0x3d, 0xdd, 0xff])]
 #[case(br#"LDX $ffdd , y"#, &[0xBE, 0xdd, 0xff])]
 #[case(br#"JMP ($ffdd)"#, &[0x6c, 0xdd, 0xff])] // Only jump has indirect mode
+#[case(br#"LDX #$08
+decrement2:
+    STX $0201
+@decrement:
+    DEX
+    STX $0200
+    CPX #$03
+    BNE @decrement
+    BNE decrement2
+    STX $0201
+    BRK"#, &[0xA2, 0x08, 0x8E, 0x01, 0x02, 0xCA, 0x8E, 0x00, 0x02, 0xE0, 0x03, 0xD0, 0xF8, 0xD0, 0xF3, 0x8E, 0x01, 0x02, 0x00])]
+#[case(br#"var1 = $10
+var2 = 22
+var3 = %11001100
+
+CPX #var1"#, &[0xe0, 0x10])]
+#[case(br#".dsb 5"#, &[0x00, 0x00, 0x00, 0x00, 0x00])]
+#[case(br#".dsb 5 , $10"#, &[0x10, 0x10, 0x10, 0x10, 0x10])]
+#[case(br#".dsw 5"#, &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])]
+#[case(br#".dsw 5 , $1122"#, &[0x22, 0x11, 0x22, 0x11, 0x22, 0x11, 0x22, 0x11, 0x22, 0x11])]
 fn check_codes(#[case] data: &'_ [u8], #[case] codes: &'_ [u8]) {
     let context = Context::default();
     let path = PathBuf::from("main.asm");
@@ -306,6 +328,10 @@ fn parser_fail(#[case] data: &'_ [u8]) {
 #[case(br#".fBNE  = "Hello""#)]
 #[case(br#"AND ($0008) , x"#)]
 #[case(br#"AND ($0008 , Y)"#)]
+#[case(br#"
+VAR = 1
+VAR = 1
+"#)]
 fn ast_generator_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
         let path = PathBuf::from("main.asm");
@@ -403,17 +429,17 @@ fn fail_test(#[case] code_filename: &str) {
 
 #[rstest]
 #[case(br#"@decrement:"#)]
-//#[case(br#"LDX #$08
-//decrement2:
-//    STX $0201
-//@decrement:
-//    DEX
-//    STX $0200
-//    CPX #$03
-//    BNE @decrement
-//    BNE decrement2
-//    STX $0201
-//    BRK"#)]
+#[case(br#"LDX #$08
+decrement2:
+    STX $0201
+@decrement:
+    DEX
+    STX $0200
+    CPX #$03
+    BNE @decrement
+    BNE decrement2
+    STX $0201
+    BRK"#)]
 fn local_branch_test(#[case] data: &'_ [u8]) {
     let context = Context::default();
     let path = PathBuf::from("main.asm");
