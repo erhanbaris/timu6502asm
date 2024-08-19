@@ -3,7 +3,7 @@ use std::{fs::File, io::Read, path::PathBuf};
 use rstest::*;
 
 use crate::{
-    ast::AstGenerator,
+    ast::{AstGenerator, InstrInfo, InstrValue, InstrInfoRegister},
     code_gen::{CodeGenerator, CodeGeneratorError},
     context::Context,
     parser::Parser,
@@ -76,6 +76,39 @@ fn compile_test(#[case] data: &'_ [u8]) {
     let mut generator = CodeGenerator::new();
     let context = generator.generate(context).unwrap();
     generator.dump(&context);
+}
+
+#[rstest]
+#[case(br#"#$08"#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: true, in_parenthesis: false, register: InstrInfoRegister::None })]
+#[case(br#"#$0008"#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: true, in_parenthesis: false, register: InstrInfoRegister::None })]
+#[case(br#"$08"#,  InstrInfo { value: InstrValue::Byte(0x08), is_immediate: false, in_parenthesis: false, register: InstrInfoRegister::None })]
+#[case(br#"$0800"#,  InstrInfo { value: InstrValue::Word(0x0800), is_immediate: false, in_parenthesis: false, register: InstrInfoRegister::None })]
+#[case(br#"($0800)"#, InstrInfo { value: InstrValue::Word(0x0800), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::None })]
+#[case(br#"($0008, X)"#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::X })]
+#[case(br#"($0008) , Y"#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::Y })]
+#[case(br#"( $08, X ) "#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::X })]
+#[case(br#"( $08 ) , Y "#, InstrInfo { value: InstrValue::Byte(0x08), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::Y })]
+#[case(br#"( test ) , Y "#, InstrInfo { value: InstrValue::Reference("test".to_string()), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::Y })]
+#[case(br#"(test),Y"#, InstrInfo { value: InstrValue::Reference("test".to_string()), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::Y })]
+#[case(br#"#test"#, InstrInfo { value: InstrValue::Reference("test".to_string()), is_immediate: true, in_parenthesis: false, register: InstrInfoRegister::None })]
+#[case(br#"(test)"#, InstrInfo { value: InstrValue::Reference("test".to_string()), is_immediate: false, in_parenthesis: true, register: InstrInfoRegister::None })]
+#[case(br#"test"#, InstrInfo { value: InstrValue::Reference("test".to_string()), is_immediate: false, in_parenthesis: false, register: InstrInfoRegister::None })]
+fn number_parsing_test(#[case] data: &'_ [u8], #[case] expected: InstrInfo) {
+    let context = Context::default();
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
+
+    let mut parser = Parser::new(0, data, context);
+    parser.parse().unwrap();
+    parser.friendly_dump();
+
+    let context = parser.context;
+
+    let ast_generator = AstGenerator::new();
+    ast_generator.size.set(context.tokens.borrow().len());
+    let info = ast_generator.parse_instr_value(&context).unwrap();
+    assert_eq!(info, expected);
 }
 
 /*
@@ -197,7 +230,7 @@ LDx IOREST"#, &[0xad, 0x4a, 0xff, 0xae, 0x3f, 0xff])]
 #[case(br#"AND $ffdd"#, &[0x2d, 0xdd, 0xff])]
 #[case(br#"AND ($ff, x)"#, &[0x21, 0xff])]
 #[case(br#"AND ($00ff, x)"#, &[0x21, 0xff])]
-#[case(br#"AND ($ff,Y )"#, &[0x31, 0xff])]
+#[case(br#"AND ($ff),Y"#, &[0x31, 0xff])]
 #[case(br#"LDX $ff,Y"#, &[0xb6, 0xff])]
 #[case(br#"AND $ff,x"#, &[0x35, 0xff])]
 #[case(br#"AND $ffdd , x"#, &[0x3d, 0xdd, 0xff])]
@@ -271,6 +304,8 @@ fn parser_fail(#[case] data: &'_ [u8]) {
 #[case(br#"BNE "Hello""#)]
 #[case(br#"BNE  = "Hello""#)]
 #[case(br#".fBNE  = "Hello""#)]
+#[case(br#"AND ($0008) , x"#)]
+#[case(br#"AND ($0008 , Y)"#)]
 fn ast_generator_fail(#[case] data: &'_ [u8]) {
     let context = Context::default();
         let path = PathBuf::from("main.asm");
@@ -364,4 +399,37 @@ fn fail_test(#[case] code_filename: &str) {
 
     let mut generator = CodeGenerator::new();
     assert!(generator.generate(context).is_err());
+}
+
+#[rstest]
+#[case(br#"@decrement:"#)]
+//#[case(br#"LDX #$08
+//decrement2:
+//    STX $0201
+//@decrement:
+//    DEX
+//    STX $0200
+//    CPX #$03
+//    BNE @decrement
+//    BNE decrement2
+//    STX $0201
+//    BRK"#)]
+fn local_branch_test(#[case] data: &'_ [u8]) {
+    let context = Context::default();
+    let path = PathBuf::from("main.asm");
+    context.add_file(0, path);
+    context.code_files.borrow_mut()[0].data = data.to_vec();
+
+    let mut parser = Parser::new(0, data, context);
+    parser.parse().unwrap();
+    parser.friendly_dump();
+
+    let context = parser.context;
+
+    let ast_generator = AstGenerator::new();
+    let context = ast_generator.generate(context).unwrap();
+
+    let mut generator = CodeGenerator::new();
+    let context = generator.generate(context).unwrap();
+    generator.dump(&context);
 }

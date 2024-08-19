@@ -42,6 +42,7 @@ pub struct Parser<'a> {
 pub enum Token {
     Instr(usize),
     Keyword(String),
+    LocalKeyword(String),
     String(String),
     Directive(String),
     Comment(String),
@@ -51,7 +52,7 @@ pub enum Token {
     CloseParenthesis,
     Sharp,
     Branch(String),
-    BranchNext(String),
+    LocalBranch(String),
     Byte(u8),
     Word(u16),
     NewLine(usize),
@@ -88,6 +89,9 @@ pub enum ParseError {
     
     #[error("Invalid keyword")]
     InvalidKeyword,
+    
+    #[error("Missing colon")]
+    MissingColon,
     
     #[error("Invalid directive")]
     InvalidDirective,
@@ -217,6 +221,7 @@ impl<'a> Parser<'a> {
             b'%' => self.parse_binary(),
             b'0'..=b'9' => self.parse_absolute_decimal(),
             b'#' => self.parse_sharp(),
+            b'@' => self.parse_local_branch(),
             b'a'..=b'z' | b'A'..=b'Z' => self.parse_keyword(),
             b'.' => self.parse_directive(),
             b'"' => self.parse_string(),
@@ -386,6 +391,43 @@ impl<'a> Parser<'a> {
         Ok(Token::Keyword(str::from_utf8(&self.data[start..self.index])?.to_string()))
     }
 
+    fn parse_local_branch(&mut self) -> Result<Token, ParseError> {
+        self.eat_expected(b'@', ParseError::UnknownToken)?;
+        let start = self.index;
+
+        let mut valid = false;
+
+        loop {
+            match self.peek() {
+                Ok(byte) => {
+                    match byte {
+                        b'0'..=b'9' => (),
+                        b'a'..=b'z' => valid = true,
+                        b'A'..=b'Z' => valid = true,
+                        b'_' => (),
+                        b':' | b'\t' => break,
+                        b'\n' | b'\r' => break,
+                        _ => return Err(ParseError::InvalidKeyword),
+                    };
+                    self.eat()?;
+                }
+                Err(ParseError::OutOfScope) => break,
+                _ => return Err(ParseError::InvalidKeyword),
+            };
+        }
+
+        if !valid {
+            return Err(ParseError::InvalidKeyword);
+        }
+
+        if let Ok(b':') = self.peek() {
+            self.eat()?;
+            return Ok(Token::LocalBranch(str::from_utf8(&self.data[start..self.index-1])?.to_string()))
+        }
+
+        return Ok(Token::LocalKeyword(str::from_utf8(&self.data[start..self.index])?.to_string()));
+    }
+
     fn parse_string(&mut self) -> Result<Token, ParseError> {
         self.eat_expected(b'"', ParseError::InvalidString)?;
         let start = self.index;
@@ -446,7 +488,7 @@ impl<'a> Parser<'a> {
         }
 
         if branch {
-            return Ok(Token::BranchNext(str::from_utf8(&self.data[start..self.index - 1])?.to_string()));
+            return Ok(Token::Branch(str::from_utf8(&self.data[start..self.index - 1])?.to_string()));
         }
 
         Ok(Token::Directive(str::from_utf8(&self.data[start..self.index])?.to_string()))
@@ -527,9 +569,10 @@ impl<'a> Parser<'a> {
                 Token::Space(_) => "SPACE",
                 Token::End => "END",
                 Token::String(_) => "STRING",
-                Token::BranchNext(_) => "BRANCHNEXT",
                 Token::Assign => "ASSIGN",
                 Token::Comma => "COMMA",
+                Token::LocalBranch(_) => "LOCAL BR",
+                Token::LocalKeyword(_) => "LOCAL KEY"
             };
 
             if ast.line != line {

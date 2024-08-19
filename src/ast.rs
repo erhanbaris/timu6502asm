@@ -9,10 +9,33 @@ use thiserror::Error;
 
 use crate::{context::Context, directive::{DirectiveEnum, DirectiveType, DirectiveValue, SYSTEM_DIRECTIVES}, opcode::{ModeType, BRANCH_INSTS, INSTS_SIZE, JUMP_INSTS}, parser::{Parser, Token, TokenType}, tool::print_error};
 
+#[derive(Debug, PartialEq)]
+pub enum InstrValue {
+    Byte(u8),
+    Word(u16),
+    Reference(String),
+    LocalReference(String)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum InstrInfoRegister {
+    None,
+    X,
+    Y
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InstrInfo {
+    pub value: InstrValue,
+    pub is_immediate: bool,
+    pub in_parenthesis: bool,
+    pub register: InstrInfoRegister
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum BranchType {
     Generic,
-    Next
+    Local
 }
 
 #[derive(Debug)]
@@ -20,7 +43,7 @@ pub enum Ast {
     InstrImplied(usize),
     InstrBranch(usize, String),
     InstrJump(usize, String),
-    Instr(usize, u16, ModeType),
+    Instr(usize, InstrInfo),
     Branch(String, BranchType),
     Directive(DirectiveEnum, Vec<DirectiveValue>)
 }
@@ -63,7 +86,7 @@ impl AstGeneratorError {
 #[derive(Debug)]
 pub struct AstGenerator {
     pub index: Cell<usize>,
-    pub size: Cell<usize>,
+    pub(crate) size: Cell<usize>,
     pub include_asm: RefCell<Option<DirectiveValue>>
 }
 
@@ -114,76 +137,13 @@ impl AstGenerator {
     }
 
     fn cleanup_space(&self, context: &Context) -> Result<(), AstGeneratorError> {
-        let token_index = self.peek()?;
-        let token = &context.tokens.borrow()[token_index];
-        if let Token::Space(_) = token.token {
-            let _ = self.eat();
+        if let Ok(token_index) = self.peek() {
+            let token = &context.tokens.borrow()[token_index];
+            if let Token::Space(_) = token.token {
+                let _ = self.eat();
+            }
         }
         Ok(())
-    }
-    
-    fn eat_if_number(&self, context: &Context) -> Option<(u16, ModeType)> {
-
-        if let Ok(mut position) = self.peek() {
-            let tokens = context.tokens.borrow();
-            let mut immediate = false;
-            let mut mode = ModeType::ZeroPage;
-            let mut number = 0_u16;
-            let index = self.index.get();
-            
-            if let Token::Sharp = &tokens[position].token {
-                let _ = self.eat();
-                immediate = true;
-                if let Ok(new_position) = self.peek() {
-                    position = new_position;
-                } else {
-                    self.index.set(index);
-                    return None;
-                }
-            }
-            
-            if let Token::Byte(byte) = &tokens[position].token {
-                let _ = self.eat();
-                mode = ModeType::ZeroPage;
-                number = *byte as u16;
-            }
-
-            else if let Token::Word(word) = &tokens[position].token {
-                let _ = self.eat();
-                mode = ModeType::Absolute;
-                number = *word;
-            }
-
-            else if let Token::Keyword(keyword) = &tokens[position].token {
-                let references = context.references.borrow();
-                let values = references.get(keyword)?;
-                if values.len() != 1 {
-                    self.index.set(index);
-                    return None
-                }
-
-                let first_value = &values[0];
-                (number, mode) = match first_value {
-                    DirectiveValue::Byte(number) => (*number as u16, ModeType::ZeroPage),
-                    DirectiveValue::Word(number) => ({ *number }, ModeType::Absolute),
-                    _ => {
-                        self.index.set(index);
-                        return None
-                    }
-                };
-                let _ = self.eat();
-            }
-
-            return match immediate {
-                true => Some((number, ModeType::Immediate)),
-                false => match mode == ModeType::Absolute {
-                    true => Some((number, ModeType::Absolute)),
-                    false => Some(((number as u8) as u16, ModeType::ZeroPage)),
-                },
-            };
-        }
-
-        None
     }
     
     fn eat_assign(&self, context: &Context) -> Result<(), AstGeneratorError> {
@@ -200,6 +160,7 @@ impl AstGenerator {
         let token = &context.tokens.borrow()[token_index];
         match &token.token {
             Token::Keyword(text) => Ok(text.clone()),
+            Token::LocalBranch(text) => Ok(text.clone()),
             _ => Err(AstGeneratorError::syntax_issue(context, token_index, "Expected text".to_string()))
         }
     }
@@ -235,7 +196,6 @@ impl AstGenerator {
                     Some(Token::Word(number)) => { values.push(DirectiveValue::Word(*number)); token_found = true; },
                     Some(Token::Byte(number)) => { values.push(DirectiveValue::Byte(*number)); token_found = true; },
                     Some(Token::String(string)) => { values.push(DirectiveValue::String(string.clone())); token_found = true; },
-                    Some(Token::BranchNext(name)) => { values.push(DirectiveValue::Reference(name.clone())); token_found = true; },
                     Some(Token::NewLine(_)) => finish = true,
                     Some(Token::Comment(_)) => finish = true,
                     Some(Token::End) => finish = true,
@@ -363,100 +323,119 @@ impl AstGenerator {
         Ok(())
     }
 
-    pub(crate) fn try_parse_number(&self, context: &Context) -> Result<(u16, ModeType), AstGeneratorError> {
+    pub(crate) fn parse_instr_value(&self, context: &Context) -> Result<InstrInfo, AstGeneratorError> {
         self.cleanup_space(context)?;
         let tokens = context.tokens.borrow();
-        let token_index = self.peek()?;
-        let token = &tokens[token_index];
+
+        let token_index = self.eat()?;
+        let mut token = &tokens[token_index];
+
+        let mut inst_info = InstrInfo {
+            in_parenthesis: false,
+            is_immediate: false,
+            register: InstrInfoRegister::None,
+            value: InstrValue::Byte(0)
+        };
+
+        let mut parenthesis_open = false;
 
         if let Token::OpenParenthesis = token.token {
-            let mut mode = ModeType::Indirect;
-            let mut parenthesis_closed = false;
-            self.eat()?;
-            self.cleanup_space(context)?;
-            
-            let Some((number, _)) = self.eat_if_number(context) else {
-                return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()));
-            };
+            inst_info.in_parenthesis = true;
+            parenthesis_open = true;
 
             self.cleanup_space(context)?;
+            let token_index = self.eat()?;
+            token = &tokens[token_index];
+        }
 
-            let token_index = self.peek()?;
-            let token = &tokens[token_index];
-            if let Token::OpenParenthesis = token.token {
-                self.eat()?;
-                parenthesis_closed = true;
+        if let Token::Sharp = &token.token {
+            inst_info.is_immediate = true;
+
+            let token_index = self.eat()?;
+            token = &tokens[token_index];
+        }
+
+        match &token.token {
+            Token::Keyword(keyword) => {
+                let references = context.references.borrow();
+                if let Some(values) = references.get(keyword) {
+                    if values.len() != 1 {
+                        return Err(AstGeneratorError::syntax_issue(context, token_index, "Only one token required".to_string()))
+                    }
+    
+                    let first_value = &values[0];
+                    match first_value {
+                        DirectiveValue::Byte(byte) => inst_info.value = InstrValue::Byte(*byte),
+                        DirectiveValue::Word(word) => inst_info.value = InstrValue::Word(*word),
+                        _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid token for number".to_string()))
+                    };
+                } else {
+                    inst_info.value = InstrValue::Reference(keyword.to_owned());
+                }
+            },
+            Token::Byte(byte) =>  inst_info.value = InstrValue::Byte(*byte),
+            Token::Word(word) => inst_info.value = InstrValue::Word(*word),
+            _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()))
+        };
+        
+        self.cleanup_space(context)?;
+
+        if let Ok(token_index) = self.peek() {
+            token = &tokens[token_index];
+            if let Token::CloseParenthesis = token.token {
+                let _ = self.eat()?;
+                parenthesis_open = false;
+                self.cleanup_space(context)?;
+    
+                let token_index = self.peek()?;
+                token = &tokens[token_index];
             }
             
-            self.cleanup_space(context)?;
-            let token_index = self.peek()?;
-            let token = &tokens[token_index];
             if let Token::Comma = token.token {
                 self.eat()?;
                 self.cleanup_space(context)?;
-
+    
                 let token_index = self.peek()?;
-                let token = &tokens[token_index];
-
-                mode = match &token.token {
-                    Token::Keyword(value) if value == "x" || value == "X" => ModeType::IndirectX,
-                    Token::Keyword(value) if value == "y" || value == "Y" => ModeType::IndirectY,
+                token = &tokens[token_index];
+    
+                match &token.token {
+                    Token::Keyword(value) if value == "x" || value == "X" => inst_info.register = InstrInfoRegister::X,
+                    Token::Keyword(value) if value == "y" || value == "Y" => inst_info.register = InstrInfoRegister::Y,
                     _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X or Y".to_string()))
                 };
-
+    
+                if parenthesis_open && inst_info.register == InstrInfoRegister::Y {
+                    return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X".to_string()))
+                
+                } else if !parenthesis_open && inst_info.in_parenthesis && inst_info.register == InstrInfoRegister::X {
+                    return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected Y".to_string()))
+                }
                 
                 self.eat()?;
             }
-
-            self.cleanup_space(context)?;
-
-            if !parenthesis_closed {
-                self.eat_expected(context, TokenType::CloseParenthesis, AstGeneratorError::syntax_issue(context, token_index, "Expected ')'".to_string()))?;
-            }
-
-            Ok((number, mode))
-
-        } else {
-            self.cleanup_space(context)?;
-            
-            let Some((number, mut mode)) = self.eat_if_number(context) else {
-                return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid numbering number format".to_string()));
-            };
-
-            if mode == ModeType::Immediate {
-                return Ok((number, mode));
-            }
-
-            self.cleanup_space(context)?;
-            let token_index = self.peek()?;
-            let token = &tokens[token_index];
-            if let Token::Comma = token.token {
-                self.eat()?;
-                self.cleanup_space(context)?;
-
-                let token_index = self.peek()?;
-                let token = &tokens[token_index];
-
-                mode = match &token.token {
-                    Token::Keyword(value) if value == "x" || value == "X" => match mode {
-                        ModeType::Absolute => ModeType::AbsoluteX,
-                        ModeType::ZeroPage => ModeType::ZeroPageX,
-                        _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
-                    },
-                    Token::Keyword(value) if value == "y" || value == "Y" => match mode {
-                        ModeType::Absolute => ModeType::AbsoluteY,
-                        ModeType::ZeroPage => ModeType::ZeroPageY,
-                        _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Invalid usage".to_string()))
-                    },
-                    _ => return Err(AstGeneratorError::syntax_issue(context, token_index, "Expected X or Y".to_string()))
-                };
-                self.eat()?;
-            }
-
-            Ok((number, mode))
         }
-    }
     
+        self.cleanup_space(context)?;
+
+        if parenthesis_open {
+            self.eat_expected(context, TokenType::CloseParenthesis, AstGeneratorError::syntax_issue(context, token_index, "Expected ')'".to_string()))?;
+        }
+
+        if inst_info.is_immediate && !inst_info.in_parenthesis && inst_info.register == InstrInfoRegister::None {
+            if let InstrValue::Word(word) = inst_info.value {
+                inst_info.value = InstrValue::Byte(word as u8);
+            }
+        }
+
+        if !inst_info.is_immediate && inst_info.in_parenthesis && inst_info.register != InstrInfoRegister::None {
+            if let InstrValue::Word(word) = inst_info.value {
+                inst_info.value = InstrValue::Byte(word as u8);
+            }
+        }
+
+        Ok(inst_info)
+    }
+
     fn generate_code_block(&self, context: &Context, token_index: usize, positon: usize) -> Result<(), AstGeneratorError> {
 
         if INSTS_SIZE[positon] == 1 {
@@ -475,8 +454,8 @@ impl AstGenerator {
             self.eat_space(context)?;
             let index = self.index.get();
 
-            if let Ok((number, mode)) = self.try_parse_number(context) {
-                context.add_ast(token_index, Ast::Instr(positon, number, mode));
+            if let Ok(value) = self.parse_instr_value(context) {
+                context.add_ast(token_index, Ast::Instr(positon, value));
                 return Ok(())
             }
 
@@ -494,8 +473,8 @@ impl AstGenerator {
 
         else {
             self.eat_space(context)?;
-            let (number, mode) = self.try_parse_number(context)?;
-            context.add_ast(token_index, Ast::Instr(positon, number, mode));
+            let value = self.parse_instr_value(context)?;
+            context.add_ast(token_index, Ast::Instr(positon, value));
         }
         
         Ok(())
@@ -526,7 +505,8 @@ impl AstGenerator {
                     Some(Token::Assign) => return Err(AstGeneratorError::syntax_issue(context, token_index, "'=' not expected".to_string())),
                     Some(Token::Comma) => return Err(AstGeneratorError::syntax_issue(context, token_index, "',' not expected".to_string())),
                     Some(Token::String(_)) => return Err(AstGeneratorError::syntax_issue(context, token_index, "String not expected".to_string())),
-                    Some(Token::BranchNext(name)) => self.generate_branch(context, token_index, name, BranchType::Next)?,
+                    Some(Token::LocalKeyword(_)) => return Err(AstGeneratorError::syntax_issue(context, token_index, "Unexpected local branch name".to_string())),
+                    Some(Token::LocalBranch(name)) => self.generate_branch(context, token_index, name, BranchType::Local)?,
                     Some(Token::End) => break,
                     None => return Err(AstGeneratorError::InternalError)
                 }

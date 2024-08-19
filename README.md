@@ -39,7 +39,7 @@ Compiler tested under Windows and MacOS operating system. It should work under L
 
 
 ## Usage
-timu6502 is terminal based compiler and there is no UI yet available. So, basic usage is:
+timu6502 is terminal based compiler. So, basic usage is:
 ```bash
 timu6502asm test.asm --target test.bin
 timu6502asm test.asm --binary-dump
@@ -47,7 +47,7 @@ timu6502asm test.asm --token-dump
 timu6502asm test.asm --token-dump --slient
 timu6502asm --help
 ```
-If the compilation operation failed, process exit code will be **1**.
+If the compilation operation failed, process exit code will be **1** and print error descriptions if silent mode is off.
 
 ## Data types
 Compiler works with primative data types.
@@ -83,7 +83,7 @@ $CC33             ; in hexadecimal format
 ### Ascii
 It takes up different sizes of space depending on the definition. The text must be written between double quotes.
 ```assembly
-"Hello world" ; in decimal format
+"Hello world"
 ```
 
 ## Available directives
