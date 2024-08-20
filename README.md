@@ -44,28 +44,6 @@ end:
     BRK
 ```
 As you can see in the example there are **init**, **loop** and **end** branches defined and used with the instruction code.
-
-Also, compiler has a support for local branches.
-```assembly
-branch1:
-    @local1:
-        INX
-
-    @local2:
-        INY
-    jump @local1
-
-branch2:
-    @local1:
-        DEX
-
-    @local2:
-        DEY
-    jump @local1
-```
-
-As you can see in the example there are **init**, **loop** and **end** branches defined and used with the instruction code.
-
 Also, compiler has a support for local branches.
 ```assembly
 branch1:
@@ -230,6 +208,20 @@ Fill memory from the current address to a specified address.  A fill value may a
 Change the default filler for **.pad**.
 ```assembly
 .fillvalue $ff
+```
+
+### .dsb
+ Define storage bytes. The size argument may be followed by a fill value (default filler is 0).
+```assembly
+.dsb $05 ; same as .byte $00, $00, $00, $00, $00
+.dsb $05, $11 ; same as .byte $11, $11, $11, $11, $11
+```
+
+### .dsw
+ Define storage words. The size argument may be followed by a fill value (default filler is 0).
+```assembly
+.dsw $05 ; same as .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.dsw $05, $1122 ; same as .byte $22, $11, $22, $11, $22, $11, $22, $11, $22, $11
 ```
 
 There are many things to do. Here are the some todos:
