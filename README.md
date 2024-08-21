@@ -3,7 +3,7 @@
 [![codecov](https://codecov.io/gh/erhanbaris/timu6502asm/graph/badge.svg?token=GWS9VMW347)](https://codecov.io/gh/erhanbaris/timu6502asm)
 ![Build](https://github.com/erhanbaris/timu6502asm/actions/workflows/rust.yml/badge.svg)
 
-Yet another 6502 Asm compiler project. The goal is make a multi platform (include web) compiler generator. Project is still in very early stage and there is no easy way to use it. You can check the code or wait to get more usable version.
+Yet another 6502 assembler project. The goal is make a multi platform (include web) compiler generator. Project is still in very early stage and there is no easy way to use it. You can check the code or wait to get more usable version.
 
 ## Building
 timu6502 builded with latest Rust Language. You have to install Rust Language. After installetion execute ```cargo build --release``` command. The executable will be located under _target/release/_ folder.
