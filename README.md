@@ -63,16 +63,16 @@ branch2:
     jump @local1
 ```
 
-## Variable
-You can define static variable and use it with instruction.
+## Const
+You can define consts and use it with instruction.
 
 Example:
 ```assembly
-var1 = $10
-var2 = 22
-var3 = %11001100
+const1 = $10
+const2 = 22
+const3 = %11001100
 
-CPX #var1
+CPX #const1
 ```
 
 ## Data types
@@ -139,8 +139,8 @@ Define byte sized data. Must be followed by a sequence of (byte ranged) expressi
 ### .word
 Write 1 or many word information into memory
 ```assembly
-.byte $1122
-.byte $3344, $5566
+.word $1122
+.word $3344, $5566
 ```
 ```
 0000: 22 11 44 33 66 55
